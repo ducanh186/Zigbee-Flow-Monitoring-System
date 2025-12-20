@@ -2,9 +2,9 @@
 import serial
 import time
 
-PORTS = ["COM7", "COM6"]  # Test both ports
-BAUDRATES = [115200, 9600, 19200, 38400, 57600, 76800, 230400, 460800, 921600]  # Extended list
-TEST_DURATION = 3  # seconds per baudrate (shorter for more tests)
+PORTS = ["COM7"]  # Test only COM7
+BAUDRATES = [115200, 9600, 19200, 38400, 57600]  # Most common rates
+TEST_DURATION = 2  # seconds per baudrate (quick test)
 
 print("=" * 70)
 print("TESTING MULTIPLE PORTS & BAUDRATES")
