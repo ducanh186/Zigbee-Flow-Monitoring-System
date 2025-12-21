@@ -1,0 +1,60 @@
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Project-specific
+telemetry.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Firmware/build artifacts
+*.o
+*.a
+*.lib
+*.dll
+
+# Test/debug outputs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+*.orig
+
+# Linter/formatter cache
+.sunlint-cache/

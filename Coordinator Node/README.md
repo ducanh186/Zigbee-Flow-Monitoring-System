@@ -1,3 +1,17 @@
+# Coordinator Node — Short Summary
+
+This firmware implements the Zigbee Coordinator and a UART JSON gateway.
+
+- Behavior: manages the Zigbee network, receives flow and battery reports,
+    performs simple auto-control (close valve when flow > threshold; open when
+    flow == 0), and emits UART messages prefixed with `@DATA`, `@LOG`,
+    `@INFO`, and `@ACK`.
+- Control: accepts `@CMD` JSON over UART for operations such as
+    `valve_set`, `threshold_set`, `net_cfg_set`, and `net_form`.
+
+Main sources: `app.c`, `main.c`.
+
+Refer to source files for implementation details.
 # Coordinator Node - Node Điều Phối Trung Tâm
 
 ## 📋 Tổng quan
@@ -32,39 +46,7 @@ Coordinator Node là trung tâm điều phối của mạng Zigbee, có nhiệm 
 - **Thủ công:** Nhận lệnh từ nút nhấn, CLI, hoặc PC
 - Gửi On/Off command tới Actuator Node
 
-## 🔌 Kết nối phần cứng
 
-```
-EFR32MG12 Development Kit
-    │
-    ├─── USART/SPI ───────> LCD Display (128x128)
-    │                       - CS, MOSI, SCK pins
-    │
-    ├─── UART ────────────> PC Serial (debug/dashboard)
-    │                       - TX, RX pins
-    │
-    ├─── GPIO Input ──────> Buttons (manual control)
-    │                       - BTN0: Toggle auto/manual
-    │                       - BTN1: Open valve
-    │
-    └─── LED ─────────────> Status indicators
-                            - Network status
-                            - Operating mode
-```
-
-### Pin mapping gợi ý
-
-| Chức năng | Pin | Mô tả |
-|-----------|-----|-------|
-| LCD CS | PC6 | SPI Chip Select |
-| LCD MOSI | PC0 | SPI Data |
-| LCD SCK | PC1 | SPI Clock |
-| UART TX | PA0 | Console output |
-| UART RX | PA1 | Console input |
-| Button 0 | PF6 | Mode toggle |
-| Button 1 | PF7 | Manual valve control |
-| LED 0 | PF4 | Network status |
-| LED 1 | PF5 | Auto/Manual mode |
 
 ## 🔧 Cấu hình Zigbee (ZAP)
 
@@ -159,18 +141,6 @@ Coordinator là **Client**, nên không có attribute riêng. Nhưng cần xử 
          └─> Refresh display (1 Hz)
 ```
 
-## 💻 Cấu trúc code chính
-
-### File quan trọng
-
-```
-src/
-├── app.c                      # Main application logic
-├── lcd_display.c/.h           # LCD driver và UI
-├── control_logic.c/.h         # Auto control logic
-├── uart_handler.c/.h          # UART command parser
-└── [tên_project]_callbacks.c # Zigbee callbacks
-```
 
 ### Các hàm callback quan trọng
 
@@ -566,47 +536,3 @@ zcl global read 0x000C 0x0055
 send <nodeId> 1 1
 ```
 
-## 🚀 Bắt đầu nhanh
-
-1. **Import Z3Gateway example** (hoặc tạo project Coordinator mới)
-2. **Cấu hình ZAP:** thêm Analog Input Client, On/Off Client
-3. **Thêm LCD driver** từ GLIB/DMD
-4. **Implement callbacks** để xử lý report
-5. **Thêm logic điều khiển** auto/manual
-6. **Build và flash**
-7. **Test với Sensor và Actuator**
-
-## 📚 Tài liệu tham khảo
-
-- [Zigbee Network Formation](https://www.silabs.com/documents/public/application-notes/an1298-zigbee-network-formation.pdf)
-- [Trust Center Guide](https://www.silabs.com/documents/public/user-guides/ug103-05-fundamentals-security.pdf)
-- [GLIB Graphics Library](https://docs.silabs.com/gecko-platform/latest/service/api/group-glib)
-- [Simplicity Commander CLI](https://www.silabs.com/documents/public/user-guides/ug162-simplicity-commander-reference-guide.pdf)
-
-## ⚡ Tips phát triển
-
-**💡 Tip 1:** Dùng UART console để debug trước khi thêm LCD, dễ debug hơn.
-
-**💡 Tip 2:** Test với giá trị giả lập trước, sau đó mới nối Sensor/Actuator thật.
-
-**💡 Tip 3:** Lưu threshold và mode vào NVM để giữ sau khi reboot.
-
-**💡 Tip 4:** Implement watchdog để tự reset nếu bị treo.
-
-## ❓ FAQ
-
-**Q: Làm sao để Sensor tự động report về Coordinator?**
-A: Configure reporting trong ZAP của Sensor, hoặc dùng CLI command `zcl global send-me-a-report`.
-
-**Q: Coordinator mất điện, network có bị mất không?**
-A: Không, các node khác vẫn giữ thông tin network. Khi Coordinator bật lại, network sẽ tự phục hồi.
-
-**Q: Làm sao để biết nodeId của Sensor/Actuator?**
-A: Dùng CLI `keys print` hoặc lưu nodeId khi node join (trong `emberAfTrustCenterJoinCallback`).
-
-**Q: Có thể điều khiển nhiều Actuator cùng lúc?**
-A: Có, dùng Group addressing hoặc loop qua danh sách nodeId.
-
----
-
-**Cập nhật:** Tài liệu này sẽ được bổ sung khi có source code cụ thể.
