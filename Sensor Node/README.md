@@ -1,3 +1,14 @@
+# Sensor Node — Short Summary
+
+This firmware implements a battery-powered Zigbee sensor that periodically
+sends flow and battery reports to the Coordinator.
+
+- Behavior: joins the network, sends flow reports every ~5s (demo pattern) and
+    battery reports periodically; handles rejoin with exponential backoff.
+- Main source files: `app.c`, `main.c`.
+
+Notes: flow is reported via the Flow Measurement/Analog cluster; battery via
+the Power Configuration cluster. Timing values live in `app.c` (e.g. `TICK_MS`).
 # Sensor Node - Node Cảm Biến Lưu Lượng
 
 ## 📋 Tổng quan
@@ -21,26 +32,6 @@ Sensor Node là thiết bị đầu cuối (End Device) trong mạng Zigbee, có
 - Gửi dữ liệu lưu lượng qua Analog Input cluster
 - Gửi mức pin qua Power Configuration cluster
 - Sử dụng reporting tự động với ngưỡng thay đổi
-
-## 🔌 Kết nối phần cứng
-
-```
-EFR32MG12 Development Kit
-    │
-    ├─── GPIO (Interrupt) ──> Flow Sensor Signal Pin
-    ├─── GND ──────────────> Flow Sensor GND
-    ├─── VDD (hoặc pin) ───> Flow Sensor VCC
-    │
-    └─── ADC Channel ─────> Battery Voltage Divider
-```
-
-### Pin mapping gợi ý
-
-| Chức năng | Pin | Mô tả |
-|-----------|-----|-------|
-| Flow Sensor Input | PF4 | GPIO với interrupt capability |
-| Battery ADC | PC4 | ADC channel để đo pin |
-| LED Debug | PF6 | LED hiển thị trạng thái (tùy chọn) |
 
 ## 🔧 Cấu hình Zigbee (ZAP)
 
@@ -116,17 +107,6 @@ EFR32MG12 Development Kit
                               └────> [Main Loop]
 ```
 
-## 💻 Cấu trúc code chính
-
-### File quan trọng
-
-```
-src/
-├── app.c                      # Main application logic
-├── flow_sensor.c/.h           # Flow sensor driver
-├── battery_monitor.c/.h       # Battery monitoring
-└── [tên_project]_callbacks.c # Zigbee callbacks
-```
 
 ### Các hàm callback quan trọng
 
@@ -271,31 +251,3 @@ plugin reporting print
 plugin idle-sleep status
 ```
 
-## 🚀 Bắt đầu nhanh
-
-1. **Import project vào Simplicity Studio**
-2. **Cấu hình ZAP file** theo hướng dẫn trên
-3. **Thêm flow sensor driver** vào project
-4. **Build và flash** vào kit
-5. **Test** với flow sensor thật hoặc giả lập xung
-
-## 📚 Tài liệu tham khảo
-
-- [Zigbee Cluster Library - Analog Input](https://zigbeealliance.org/wp-content/uploads/2019/12/07-5123-06-zigbee-cluster-library-specification.pdf)
-- [EFR32MG12 GPIO Configuration](https://www.silabs.com/documents/public/reference-manuals/efr32xg12-rm.pdf)
-- [Zigbee 3.0 End Device Tutorial](https://www.silabs.com/documents/public/user-guides/ug391-zigbee-app-framework-dev-guide.pdf)
-
-## ❓ FAQ
-
-**Q: Làm sao để giả lập flow sensor khi chưa có cảm biến thật?**
-A: Tạo một timer định kỳ increment pulse_count với giá trị ngẫu nhiên, hoặc dùng nút nhấn để simulate xung.
-
-**Q: Node không join được vào network?**
-A: Kiểm tra Coordinator đã permit join chưa, và kiểm tra cấu hình security (install code).
-
-**Q: Làm sao kiểm tra node đã sleep chưa?**
-A: Dùng Energy Profiler trong Simplicity Studio để xem dòng tiêu thụ.
-
----
-
-**Cập nhật:** Tài liệu này sẽ được bổ sung khi có source code cụ thể.

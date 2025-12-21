@@ -1,3 +1,16 @@
+# Valve Node — Short Summary
+
+This firmware implements an Actuator Node that joins the Zigbee network and
+controls a valve via the On/Off cluster.
+
+- Behavior: joins the network (network-steering), listens for On/Off attribute
+    changes, toggles a GPIO/LED to represent valve open/closed, and reports
+    state.
+- Main source file: `app.c`.
+
+Notes: implement GPIO control in the On/Off attribute change callback
+(`emberAfPostAttributeChangeCallback`). Use Router mode if the node is
+line-powered.
 # Actuator Node - Node Điều Khiển Van
 
 ## 📋 Tổng quan
@@ -20,44 +33,6 @@ Actuator Node là thiết bị điều khiển van nước trong hệ thống, n
 - Báo cáo trạng thái van hiện tại
 - Đồng bộ attribute với trạng thái thật
 
-## 🔌 Kết nối phần cứng
-
-```
-EFR32MG12 Development Kit
-    │
-    ├─── GPIO Output ──────> MOSFET Gate / Relay Control
-    │                         │
-    │                         ↓
-    │                    [Driver Circuit]
-    │                         │
-    │                         ↓
-    │                    Solenoid Valve
-    │                    (12V / 24V DC)
-    │
-    └─── LED (debug) ─────> Status Indicator
-```
-
-### Pin mapping gợi ý
-
-| Chức năng | Pin | Mô tả |
-|-----------|-----|-------|
-| Valve Control | PF5 | GPIO output điều khiển relay/MOSFET |
-| Status LED | PF6 | LED hiển thị trạng thái van |
-| Button (tùy chọn) | PF7 | Nút nhấn local control |
-
-### Sơ đồ driver đơn giản
-
-```
-GPIO (3.3V) ──> [1kΩ] ──> MOSFET Gate (IRLZ44N)
-                              │
-                         Drain │
-                              ↓
-                    Valve Coil (+)
-                              │
-                              GND
-                              
-Valve Coil (-) ──> VCC (12V)
-```
 
 ## 🔧 Cấu hình Zigbee (ZAP)
 
@@ -134,16 +109,7 @@ Node phải xử lý các command sau:
               └─> Update attribute & report
 ```
 
-## 💻 Cấu trúc code chính
 
-### File quan trọng
-
-```
-src/
-├── app.c                      # Main application logic
-├── valve_control.c/.h         # Valve driver
-└── [tên_project]_callbacks.c # Zigbee callbacks
-```
 
 ### Các hàm callback quan trọng
 
@@ -352,46 +318,3 @@ option binding-table print
 # Network status
 info
 ```
-
-## 🚀 Bắt đầu nhanh
-
-1. **Import Z3Light example** vào Simplicity Studio
-2. **Modify callbacks** để điều khiển GPIO thay vì LED
-3. **Cấu hình ZAP** nếu cần thay đổi
-4. **Thêm valve driver** code
-5. **Build và flash** vào kit
-6. **Test** với Coordinator
-
-## 📚 Tài liệu tham khảo
-
-- [Zigbee Cluster Library - On/Off Cluster](https://zigbeealliance.org/wp-content/uploads/2019/12/07-5123-06-zigbee-cluster-library-specification.pdf)
-- [Z3Light Example Documentation](https://www.silabs.com/documents/public/example-code/an1199-zigbee-lighting-applications.pdf)
-- [Zigbee Binding and Groups](https://www.silabs.com/documents/public/user-guides/ug391-zigbee-app-framework-dev-guide.pdf)
-
-## ⚡ Tips phát triển
-
-**💡 Tip 1:** Bắt đầu với Z3Light example có sẵn, chỉ cần thay hàm `led_turn_on/off()` bằng `controlValve()`.
-
-**💡 Tip 2:** Dùng LED để debug trước khi nối van thật.
-
-**💡 Tip 3:** Nếu dùng relay module, có thể cần thêm optocoupler để cách ly.
-
-**💡 Tip 4:** Test với load nhỏ (LED, bóng đèn) trước khi nối van công suất lớn.
-
-## ❓ FAQ
-
-**Q: Van không hoạt động khi nhận lệnh?**
-A: Kiểm tra GPIO output level, driver circuit (relay/MOSFET), và nguồn cấp cho van.
-
-**Q: Làm sao để van hoạt động ngay cả khi mất kết nối Zigbee?**
-A: Thêm local control bằng nút nhấn, hoặc timer tự động đóng/mở.
-
-**Q: Node Router có tốn nhiều điện không?**
-A: Có, Router luôn bật RF (~30-50mA). Nếu muốn tiết kiệm, dùng End Device nhưng sẽ chậm hơn.
-
-**Q: Có thể điều khiển nhiều van cùng lúc?**
-A: Có, dùng Group addressing hoặc broadcast command.
-
----
-
-**Cập nhật:** Tài liệu này sẽ được bổ sung khi có source code cụ thể.
