@@ -1,26 +1,30 @@
 @echo off
+setlocal enabledelayedexpansion
 REM Script to run Zigbee Flow Monitoring Dashboard
 echo Starting Zigbee Flow Monitoring Dashboard...
 echo.
 echo Closing any existing Streamlit/Python processes that may be using COM7...
 echo.
 
-REM Kill existing streamlit processes
+REM Kill streamlit.exe if running
 taskkill /F /IM streamlit.exe >nul 2>&1
-taskkill /F /IM python.exe /FI "WINDOWTITLE eq *streamlit*" >nul 2>&1
 
-REM Kill any python process with dashboard or gateway in command line
-for /f "tokens=2" %%i in ('tasklist /FI "IMAGENAME eq python.exe" /FO LIST ^| findstr /I "PID"') do (
-    wmic process where "ProcessId=%%i and CommandLine like '%%dashboard%%' or CommandLine like '%%gateway%%'" delete >nul 2>&1
-)
+REM Kill python processes running dashboard, gateway, or streamlit
+wmic process where "name='python.exe' and (CommandLine like '%%dashboard%%' or CommandLine like '%%streamlit%%' or CommandLine like '%%gateway%%' or CommandLine like '%%pc_gateway%%')" delete /nointeractive >nul 2>&1
 
-echo Waiting for ports to be released...
-timeout /t 2 /nobreak >nul
+REM Alternative: Kill all python.exe processes (uncomment if above doesn't work)
+REM for /f "tokens=1" %%p in ('wmic process where name="python.exe" get processid /format:list ^| findstr "ProcessId"') do (
+REM     set "pid=%%p"
+REM     taskkill /pid !pid:*=! /f >nul 2>&1
+REM )
+
+echo Waiting for COM7 to be released...
+timeout /t 3 /nobreak >nul
 echo.
 echo Starting dashboard...
 echo.
 
-cd /d "%~dp0"
+cd /d "%~dp0Dashboard_Coordinator"
 streamlit run dashboard.py
 
 pause
