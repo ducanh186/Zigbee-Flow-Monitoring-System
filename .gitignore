@@ -35,6 +35,7 @@ venv.bak/
 *.swo
 *~
 .DS_Store
+.github/
 
 # Project-specific
 telemetry.db
