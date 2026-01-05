@@ -380,11 +380,12 @@ class ZigbeeGateway:
             ack_queue = Queue()
             self.pending_acks[cmd_id] = ack_queue
         
-        # Send via UART
-        line = f"@CMD {json.dumps(cmd)}\n"
+        # Send via CLI command "json" to bypass "No command found" error
+        # Format: json {"id":N,"op":"..."}
+        line = f"json {json.dumps(cmd)}\n"
         try:
             self.serial_conn.write(line.encode('utf-8'))
-            self._log(f"Sent @CMD id={cmd_id} op={operation}")
+            self._log(f"Sent json id={cmd_id} op={operation}")
         except Exception as e:
             if cmd_id in self.pending_acks:
                 del self.pending_acks[cmd_id]
