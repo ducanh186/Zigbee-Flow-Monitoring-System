@@ -2,10 +2,11 @@
 #include "network-steering.h"
 #include "sl_simple_led_instances.h"
 #include "zap-id.h"
+#include "stack/include/ember.h"
 
 void emberAfMainInitCallback(void)
 {
-  emberAfCorePrintln("Valve init -> start steering");
+  emberAfCorePrintln("Valve init: RxOnWhenIdle=1 -> start steering");
   if (emberAfNetworkState() != EMBER_JOINED_NETWORK) {
     EmberStatus st = emberAfPluginNetworkSteeringStart();
     emberAfCorePrintln("Steering start: 0x%02X", st);
@@ -53,6 +54,17 @@ void emberAfPostAttributeChangeCallback(uint8_t endpoint,
       emberAfCorePrintln("Read OnOff attr err: 0x%02X", st);
     }
   }
+}
+
+bool emberAfPreCommandReceivedCallback(EmberAfClusterCommand *cmd)
+{
+  if (!cmd || !cmd->apsFrame) return false;
+
+  if (cmd->apsFrame->clusterId == ZCL_ON_OFF_CLUSTER_ID) {
+    emberAfCorePrintln("RX OnOff: cmdId=0x%02X src=0x%04X ep=%u",
+                       cmd->commandId, cmd->source, cmd->apsFrame->destinationEndpoint);
+  }
+  return false;
 }
 
 void emberAfRadioNeedsCalibratingCallback(void)

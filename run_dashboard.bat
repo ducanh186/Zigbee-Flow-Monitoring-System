@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 REM Script to run Zigbee Flow Monitoring Dashboard
 echo Starting Zigbee Flow Monitoring Dashboard...
 echo.
-echo Closing any existing Streamlit/Python processes that may be using COM7...
+echo Closing any existing Streamlit/Python processes that may be using COM x ..
 echo.
 
 REM Kill streamlit.exe if running
@@ -25,6 +25,6 @@ echo Starting dashboard...
 echo.
 
 cd /d "%~dp0Dashboard_Coordinator"
-streamlit run dashboard.py
+streamlit run dashboard.py --server.address 0.0.0.0 --server.port 8502
 
 pause
