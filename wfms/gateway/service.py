@@ -27,7 +27,7 @@ import paho.mqtt.client as mqtt
 # Add parent to path for imports when running as module
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from common.proto import parse_uart_line, make_cmd_line, now_ts, validate_cmd_payload
+from common.proto import parse_uart_line, make_cmd_line, now_ts, validate_cmd_payload, translate_coordinator_ack
 from common.contract import (
     TOPIC_STATE, TOPIC_TELEMETRY, TOPIC_CMD_VALVE, TOPIC_ACK, 
     TOPIC_GATEWAY_STATUS, VALVE_ON, VALVE_OFF, update_site
@@ -349,16 +349,20 @@ class GatewayService:
         # Apply rules
         allowed, rule_reason = self.rules.check_and_mark(cid, user)
         if not allowed:
+            logger.warning(f"Command rejected by rules: cid={cid}, reason={rule_reason}")
             self._publish_ack(cid, False, rule_reason)
             return
         
         # Send command to UART
         cmd_line = make_cmd_line(payload)
-        logger.debug(f"Sending to UART: {cmd_line.strip()}")
+        logger.info(f"TX >>> {cmd_line.strip()}")  # Mức 1: Log TX rõ ràng
         
         if not self.uart.write_line(cmd_line):
+            logger.error(f"TX FAILED: uart.write_line() returned False")
             self._publish_ack(cid, False, "uart_write_failed")
             return
+        
+        logger.info(f"TX OK: Waiting ACK for cid={cid} (timeout={self.config.ack_timeout_s}s)")
         
         # Wait for ACK from UART
         ack = self.ack_router.wait_for_ack(cid, timeout=self.config.ack_timeout_s)
@@ -427,10 +431,23 @@ class GatewayService:
         self._publish_state()
     
     def _handle_uart_ack(self, ack: dict) -> None:
-        """Handle @ACK from UART."""
-        cid = ack.get("cid")
+        """Handle @ACK from UART (Coordinator format)."""
+        # Coordinator format: {"id":123,"ok":true,"msg":"..."}
+        # Translate to MQTT format: {"cid":"xxx","ok":true,"reason":"..."}
+        
+        # Check if this is Coordinator format (has "id" field) or MQTT format (has "cid" field)
+        if "id" in ack and "cid" not in ack:
+            # Coordinator format - translate
+            mqtt_ack = translate_coordinator_ack(ack)
+            cid = mqtt_ack.get("cid")
+            logger.debug(f"Translated Coordinator ACK id={ack.get('id')} -> cid={cid}")
+        else:
+            # Already MQTT format (from FakeUart)
+            mqtt_ack = ack
+            cid = ack.get("cid")
+        
         if cid:
-            resolved = self.ack_router.resolve(cid, ack)
+            resolved = self.ack_router.resolve(cid, mqtt_ack)
             if not resolved:
                 logger.debug(f"Received ACK for unknown cid={cid}")
     

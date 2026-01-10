@@ -12,14 +12,20 @@ DO NOT BREAK: Parse functions must handle all documented formats.
 
 import json
 import time
+import hashlib
 from typing import Tuple, Dict, Any, Optional
 
 
-# Protocol prefixes
+# Protocol prefixes (UART)
 PREFIX_DATA = "@DATA"
 PREFIX_ACK = "@ACK"
 PREFIX_CMD = "@CMD"
 PREFIX_LOG = "@LOG"
+PREFIX_INFO = "@INFO"
+
+# CID to numeric ID tracking (for ACK matching)
+_cid_to_id: Dict[str, int] = {}
+_id_counter: int = 1
 
 
 def parse_uart_line(line: str) -> Tuple[str, Dict[str, Any]]:
@@ -52,6 +58,7 @@ def parse_uart_line(line: str) -> Tuple[str, Dict[str, Any]]:
         PREFIX_ACK: "ACK",
         PREFIX_CMD: "CMD",
         PREFIX_LOG: "LOG",
+        PREFIX_INFO: "INFO",
     }
     
     msg_type = None
@@ -78,21 +85,63 @@ def parse_uart_line(line: str) -> Tuple[str, Dict[str, Any]]:
         return ("ERR", {"error": f"json_parse_error: {e}", "raw": line})
 
 
+def _cid_to_numeric_id(cid: str) -> int:
+    """Convert string CID to numeric ID for Coordinator."""
+    global _id_counter
+    if cid not in _cid_to_id:
+        _cid_to_id[cid] = _id_counter
+        _id_counter += 1
+    return _cid_to_id[cid]
+
+
+def _numeric_id_to_cid(numeric_id: int) -> Optional[str]:
+    """Convert numeric ID back to CID (for ACK matching)."""
+    for cid, id_val in _cid_to_id.items():
+        if id_val == numeric_id:
+            return cid
+    return None
+
+
 def make_cmd_line(cmd_dict: Dict[str, Any]) -> str:
     """
     Create a @CMD line to send via UART.
+    
+    Translates MQTT contract format to Coordinator format:
+    - MQTT: {"cid":"xxx","value":"ON","by":"user","ts":123}
+    - UART: {"id":123,"op":"valve_set","value":"open"}
     
     Args:
         cmd_dict: Command payload dict with keys: cid, value, by, ts
     
     Returns:
-        Formatted line: "@CMD {...}\n"
+        Formatted line: "@CMD {...}\\n"
     
     Example:
         >>> make_cmd_line({"cid": "abc", "value": "ON", "by": "admin", "ts": 123})
-        '@CMD {"cid":"abc","value":"ON","by":"admin","ts":123}\n'
+        '@CMD {"id":1,"op":"valve_set","value":"open"}\\n'
     """
-    json_str = json.dumps(cmd_dict, separators=(',', ':'))
+    cid = cmd_dict.get("cid", "unknown")
+    mqtt_value = cmd_dict.get("value", "").upper()
+    
+    # Map MQTT value (ON/OFF) to Coordinator value (open/closed)
+    if mqtt_value == "ON":
+        coord_value = "open"
+    elif mqtt_value == "OFF":
+        coord_value = "closed"
+    else:
+        coord_value = mqtt_value.lower()  # Pass through other values
+    
+    # Convert CID to numeric ID (Coordinator expects number)
+    numeric_id = _cid_to_numeric_id(cid)
+    
+    # Build Coordinator format
+    coord_cmd = {
+        "id": numeric_id,
+        "op": "valve_set",
+        "value": coord_value
+    }
+    
+    json_str = json.dumps(coord_cmd, separators=(',', ':'))
     return f"{PREFIX_CMD} {json_str}\n"
 
 
@@ -122,6 +171,35 @@ def make_ack_line(ack_dict: Dict[str, Any]) -> str:
     """
     json_str = json.dumps(ack_dict, separators=(',', ':'))
     return f"{PREFIX_ACK} {json_str}\n"
+
+
+def translate_coordinator_ack(coord_ack: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Translate Coordinator ACK format to MQTT contract format.
+    
+    Coordinator: {"id":123,"ok":true,"msg":"...","valve":"open"}
+    MQTT:        {"cid":"xxx","ok":true,"reason":"..."}
+    
+    Args:
+        coord_ack: ACK payload from Coordinator
+    
+    Returns:
+        Translated ACK for MQTT
+    """
+    numeric_id = coord_ack.get("id", 0)
+    ok = coord_ack.get("ok", False)
+    msg = coord_ack.get("msg", "")
+    
+    # Try to find original CID from numeric ID
+    cid = _numeric_id_to_cid(numeric_id)
+    if cid is None:
+        cid = f"id_{numeric_id}"  # Fallback if CID not found
+    
+    return {
+        "cid": cid,
+        "ok": ok,
+        "reason": msg
+    }
 
 
 def now_ts() -> int:
