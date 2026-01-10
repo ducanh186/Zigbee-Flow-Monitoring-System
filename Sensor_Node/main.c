@@ -1,3 +1,10 @@
+/**
+ * @file main.c
+ * @brief Zigbee Sleepy End Device - Main with Power Manager ENABLED
+ * 
+ * CHANGE: Uncommented sl_power_manager_sleep() to enable EM2/EM3 sleep
+ */
+
 #ifdef SL_COMPONENT_CATALOG_PRESENT
 #include "sl_component_catalog.h"
 #endif
@@ -27,12 +34,15 @@ int main(void)
     app_process_action();
 
 #if defined(SL_CATALOG_POWER_MANAGER_PRESENT)
-    // Demo mode: đừng sleep để UART/CLI luôn responsive
-    // sl_power_manager_sleep();
+    // *** SLEEP ENABLED FOR SLEEPY END DEVICE ***
+    // Device will enter EM2/EM3 when idle, wake on:
+    //   - sl_zigbee_event timer expiry
+    //   - Poll timer (LONG_POLL or SHORT_POLL)
+    //   - UART RX (for CLI, if configured)
+    // Radio is automatically turned OFF during sleep.
+    sl_power_manager_sleep();
 #endif
   }
 #endif
   return 0;
 }
-
-
