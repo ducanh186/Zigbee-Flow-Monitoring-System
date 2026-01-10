@@ -1,0 +1,22 @@
+# MQTT Client
+# Pinned to 1.6.1 to avoid breaking changes in paho-mqtt 2.x
+# (v2.x changes callback signatures and client API)
+paho-mqtt==1.6.1
+
+# Serial communication with Zigbee Coordinator
+pyserial>=3.5,<4.0
+
+# Web framework for Local Admin API
+fastapi>=0.104.0,<1.0.0
+
+# ASGI server for FastAPI
+uvicorn[standard]>=0.24.0,<1.0.0
+
+# Environment variables loader
+python-dotenv>=1.0.0,<2.0.0
+
+# Data validation and settings management
+pydantic>=2.0.0,<3.0.0
+
+# Pydantic settings (for config management)
+pydantic-settings>=2.0.0,<3.0.0
