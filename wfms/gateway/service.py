@@ -507,7 +507,17 @@ class GatewayService:
             elif msg_type == "LOG":
                 self._handle_uart_log(payload)
             elif msg_type == "ERR":
-                logger.warning(f"UART parse error: {payload}")
+                error = payload.get("error", "")
+                raw = payload.get("raw", "")
+                
+                # Check if this is a fragment (no prefix but looks like JSON)
+                if error == "unknown_prefix" and (raw.startswith('{') or raw.endswith('}')):
+                    logger.warning(f"⚠ UART FRAGMENT detected: '{raw[:50]}...' (possible buffer issue)")
+                elif error == "empty_line":
+                    # Empty lines are common noise, downgrade to debug
+                    logger.debug("UART: empty line")
+                else:
+                    logger.warning(f"UART parse error: {payload}")
         
         logger.info("UART reader thread stopped")
     

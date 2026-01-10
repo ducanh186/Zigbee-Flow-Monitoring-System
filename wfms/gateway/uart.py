@@ -145,28 +145,46 @@ class RealUart(UartBase):
             time.sleep(self.reconnect_interval)
     
     def read_line(self, timeout: float = 1.0) -> Optional[str]:
-        """Read a line from serial port."""
+        """
+        Read a line from serial port.
+        
+        Handles fragmentation by maintaining a persistent buffer across calls.
+        """
         if not self._connected:
             return None
         
+        # Use instance buffer to persist across calls
+        if not hasattr(self, '_line_buffer'):
+            self._line_buffer = b""
+        
         deadline = time.time() + timeout
-        buffer = b""
         
         while time.time() < deadline:
             with self._lock:
                 if not self._serial:
                     return None
                 try:
+                    # Read available data
                     chunk = self._serial.read(256)
                     if chunk:
-                        buffer += chunk
-                        if b'\n' in buffer:
-                            line, _ = buffer.split(b'\n', 1)
-                            return line.decode('utf-8', errors='replace').strip()
+                        self._line_buffer += chunk
+                    
+                    # Check if we have a complete line
+                    if b'\n' in self._line_buffer:
+                        line, self._line_buffer = self._line_buffer.split(b'\n', 1)
+                        line_str = line.decode('utf-8', errors='replace').strip()
+                        
+                        # Filter out empty lines and CR-only lines
+                        if line_str and line_str != '\r':
+                            return line_str
+                        # Continue reading if empty
+                        
                 except Exception as e:
                     logger.error(f"UART read error: {e}")
                     self._connected = False
+                    self._line_buffer = b""
                     return None
+            
             time.sleep(0.01)
         
         return None
