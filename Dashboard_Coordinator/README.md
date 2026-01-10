@@ -94,7 +94,7 @@ python fake_device.py --mode console | python pc_gateway.py --stdin
 ---
 
 ### `scan_com10.py` - Diagnostic Tool (7.9 KB)
-**Universal scanner** thay thế `test_serial.py` và `test_com7_baudrates.py`.
+**Universal scanner** thay thế `test_serial.py` và `test_COM10_baudrates.py`.
 
 **Usage:**
 ```bash
@@ -102,7 +102,7 @@ python fake_device.py --mode console | python pc_gateway.py --stdin
 python scan_com10.py
 
 # Scan specific port
-python scan_com10.py COM7
+python scan_com10.py COM10
 
 # Test single baudrate
 python scan_com10.py COM10 115200
@@ -221,7 +221,7 @@ streamlit --version  # Should be >= 1.29.0
 
 **Files REMOVED** (consolidated into `scan_com10.py`):
 - ~~test_serial.py~~ - Basic baudrate test
-- ~~test_com7_baudrates.py~~ - COM7-specific test
+- ~~test_COM10_baudrates.py~~ - COM10-specific test
 
 **Why consolidated?**
 - Giảm confusion (1 tool duy nhất)
@@ -231,10 +231,10 @@ streamlit --version  # Should be >= 1.29.0
 **Backward compatible:**
 ```bash
 # Old way:
-python test_com7_baudrates.py
+python test_COM10_baudrates.py
 
 # New way (same result):
-python scan_com10.py COM7
+python scan_com10.py COM10
 ```
 
 ---

@@ -178,7 +178,7 @@ Base URL: `http://localhost:8080`
 **Response 200:**
 ```json
 {
-  "uart_port": "COM7",
+  "uart_port": "COM10",
   "mqtt_host": "127.0.0.1",
   "mqtt_port": 1883,
   "site": "lab1"
@@ -214,7 +214,7 @@ Base URL: `http://localhost:8080`
 {
   "logs": [
     "[2024-01-10 10:30:00] Gateway started",
-    "[2024-01-10 10:30:01] UART connected on COM7",
+    "[2024-01-10 10:30:01] UART connected on COM10",
     "[2024-01-10 10:30:02] MQTT connected to 127.0.0.1:1883"
   ]
 }

@@ -4,6 +4,16 @@
 - **Gateway Service**: Process nền DUY NHẤT được mở cổng nối tiếp (UART/COM).
 - **Dashboards**: Kết nối qua MQTT + Local Admin API (localhost), KHÔNG trực tiếp đụng COM.
 
+---
+
+## 🚀 Quick Links
+
+- **[Hướng dẫn cho UI Developer](README_FOR_UI_DEV.md)** 👈 **Bắt đầu đây nếu bạn làm Dashboard/UI**
+- [CONTRACT.md](CONTRACT.md) - MQTT topics và payload format (chuẩn cứng)
+- [requirements.txt](requirements.txt) - Python dependencies
+
+---
+
 ## Yêu cầu hệ thống
 - Python 3.11+
 - Windows (hoặc Linux/macOS)
@@ -42,15 +52,33 @@ cp .env.example .env      # Linux/macOS
 ```
 
 Chỉnh sửa `.env`:
-- `UART_PORT`: Cổng COM (Windows: COM7, Linux: /dev/ttyUSB0)
+- `UART_PORT`: Cổng COM (Windows: COM10, Linux: /dev/ttyUSB0)
 - `MQTT_HOST`, `MQTT_PORT`: Địa chỉ MQTT broker
 - `MQTT_USER`, `MQTT_PASS`: Credentials (nếu broker yêu cầu auth)
 
-### 4. Chạy Gateway Service (sau khi code xong)
+### 4. Chạy Gateway Service
 
+**Fake UART mode (test UI mà không cần hardware):**
 ```bash
-python -m gateway.main
+python -m gateway.service --fake-uart
+
+# Hoặc double-click run_fake.ps1 (Windows)
 ```
+
+**Real UART mode (với Zigbee Coordinator):**
+```bash
+python -m gateway.service
+
+# Override port/baud nếu cần:
+python -m gateway.service --uart COM10 --baud 115200
+```
+
+**Debug mode:**
+```bash
+python -m gateway.service --fake-uart --debug
+```
+
+> 💡 **Xem thêm**: [README_FOR_UI_DEV.md](README_FOR_UI_DEV.md) để biết cách test với MQTT
 
 ## Cấu trúc thư mục
 

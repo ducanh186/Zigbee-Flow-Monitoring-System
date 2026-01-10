@@ -17,7 +17,7 @@ class Config(BaseSettings):
     """
     
     # UART Configuration
-    uart_port: str = Field(default="COM7", description="Serial port for Zigbee Coordinator")
+    uart_port: str = Field(default="COM10", description="Serial port for Zigbee Coordinator")
     uart_baud: int = Field(default=115200, description="Serial baud rate")
     
     # MQTT Configuration
