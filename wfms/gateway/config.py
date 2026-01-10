@@ -37,7 +37,9 @@ class Config(BaseSettings):
     ack_timeout_s: int = Field(default=3, description="ACK timeout in seconds")
     
     # Admin API Configuration
+    api_host: str = Field(default="127.0.0.1", description="Local Admin API host (localhost only!)")
     api_port: int = Field(default=8080, description="Local Admin API port")
+    api_token: Optional[str] = Field(default="", description="Admin API token (empty to disable auth)")
     
     # Logging Configuration
     log_level: str = Field(default="INFO", description="Log level")
@@ -67,6 +69,15 @@ class Config(BaseSettings):
             raise ValueError("Port must be between 1 and 65535")
         return v
     
+    @field_validator("api_host")
+    @classmethod
+    def validate_api_host(cls, v: str) -> str:
+        """Validate API host is localhost for security."""
+        allowed = ("127.0.0.1", "localhost", "::1")
+        if v not in allowed:
+            raise ValueError(f"API_HOST must be one of {allowed} for security")
+        return v
+    
     @field_validator("rule_lock")
     @classmethod
     def validate_lock(cls, v: int) -> int:
@@ -94,6 +105,11 @@ class Config(BaseSettings):
     def mqtt_auth_enabled(self) -> bool:
         """Check if MQTT authentication is configured."""
         return bool(self.mqtt_user and self.mqtt_pass)
+    
+    @property
+    def api_auth_enabled(self) -> bool:
+        """Check if Admin API token authentication is configured."""
+        return bool(self.api_token)
 
 
 def load_config(env_path: Optional[str] = None) -> Config:

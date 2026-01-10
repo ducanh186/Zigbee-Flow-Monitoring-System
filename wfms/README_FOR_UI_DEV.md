@@ -61,7 +61,66 @@ wfms/lab1/ack {"cid":"test_on","ok":true,"reason":"","ts":1768031400}
 
 ---
 
-## 📡 MQTT Topics (Contract)
+## � Admin API (REST - localhost only)
+
+Gateway chạy 1 REST API trên **http://127.0.0.1:8080** để:
+- Kiểm tra health/status
+- Xem logs runtime
+- Hot-reload rules (enable/disable lock, cooldown)
+
+### Endpoints
+
+| Method | Endpoint | Mô tả |
+|--------|----------|-------|
+| GET | `/health` | Health check + counters |
+| GET | `/logs?limit=50` | Recent logs |
+| GET | `/rules` | Current rules config |
+| POST | `/rules` | Update rules (hot reload) |
+| GET | `/config` | Current config snapshot |
+| GET | `/docs` | OpenAPI Swagger UI |
+
+### Ví dụ sử dụng
+
+**Check health:**
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8080/health"
+```
+
+Response:
+```json
+{
+  "up": true,
+  "uptime_s": 123.5,
+  "mqtt_connected": true,
+  "uart_connected": true,
+  "counters": {"telemetry": 100, "commands": 5, "ack_ok": 4, "ack_fail": 1}
+}
+```
+
+**Enable lock (reject all commands):**
+```powershell
+$body = '{"lock": true}'
+Invoke-RestMethod -Uri "http://127.0.0.1:8080/rules" -Method POST -Body $body -ContentType "application/json"
+```
+
+**Disable lock:**
+```powershell
+$body = '{"lock": false}'
+Invoke-RestMethod -Uri "http://127.0.0.1:8080/rules" -Method POST -Body $body -ContentType "application/json"
+```
+
+**View logs:**
+```powershell
+(Invoke-RestMethod -Uri "http://127.0.0.1:8080/logs?limit=10").logs
+```
+
+### OpenAPI Docs
+
+Mở browser: **http://127.0.0.1:8080/docs** để xem Swagger UI với tất cả endpoints.
+
+---
+
+## �📡 MQTT Topics (Contract)
 
 **QUAN TRỌNG**: Đây là contract cố định, KHÔNG được thay đổi!
 

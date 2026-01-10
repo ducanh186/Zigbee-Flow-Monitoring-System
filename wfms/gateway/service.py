@@ -35,6 +35,7 @@ from common.contract import (
 from gateway.config import load_config, Config
 from gateway.uart import UartBase, RealUart, FakeUart
 from gateway.rules import Rules, RulesConfig
+from gateway.runtime import RuntimeState
 
 # Configure logging
 logging.basicConfig(
@@ -135,9 +136,10 @@ class GatewayService:
     Bridges UART (real or fake) to MQTT.
     """
     
-    def __init__(self, config: Config, uart: UartBase):
+    def __init__(self, config: Config, uart: UartBase, runtime: Optional[RuntimeState] = None):
         self.config = config
         self.uart = uart
+        self.runtime = runtime or RuntimeState()
         
         # State
         self.state = StateCache()
@@ -158,6 +160,7 @@ class GatewayService:
         # Control
         self._running = False
         self._uart_thread: Optional[threading.Thread] = None
+        self._api_thread: Optional[threading.Thread] = None
     
     def start(self) -> None:
         """Start the gateway service."""
@@ -167,6 +170,7 @@ class GatewayService:
         logger.info(f"Site: {self.config.site}")
         logger.info(f"MQTT: {self.config.mqtt_host}:{self.config.mqtt_port}")
         logger.info(f"UART: {self.config.uart_port} @ {self.config.uart_baud}")
+        logger.info(f"Admin API: http://{self.config.api_host}:{self.config.api_port}")
         logger.info(f"Lock: {'ENABLED' if self.config.is_locked else 'DISABLED'}")
         logger.info("=" * 50)
         
@@ -174,9 +178,13 @@ class GatewayService:
         
         # Start UART
         self.uart.start()
+        self.runtime.set_uart_connected(True)
         
         # Setup MQTT
         self._setup_mqtt()
+        
+        # Start Admin API in background thread
+        self._start_admin_api()
         
         # Start UART reader thread
         self._uart_thread = threading.Thread(
@@ -185,6 +193,9 @@ class GatewayService:
             name="uart-reader"
         )
         self._uart_thread.start()
+        
+        # Log to runtime
+        self.runtime.add_log("INFO", f"Gateway started (site={self.config.site})")
         
         # Start MQTT loop (blocking)
         try:
@@ -199,16 +210,53 @@ class GatewayService:
         logger.info("Gateway shutting down...")
         self._running = False
         
+        # Log to runtime
+        self.runtime.add_log("INFO", "Gateway shutting down")
+        
         # Publish offline status
         if self.mqtt_client and self.mqtt_client.is_connected():
             offline_status = json.dumps({"up": False, "ts": now_ts()})
             self.mqtt_client.publish(TOPIC_GATEWAY_STATUS, offline_status, qos=1, retain=True)
             self.mqtt_client.disconnect()
         
+        # Update runtime state
+        self.runtime.set_mqtt_connected(False)
+        self.runtime.set_uart_connected(False)
+        
         # Stop UART
         self.uart.stop()
         
         logger.info("Gateway stopped")
+    
+    def _start_admin_api(self) -> None:
+        """Start Admin API server in background thread."""
+        try:
+            from gateway.admin_api import make_app, run_api_server
+            
+            app = make_app(
+                runtime=self.runtime,
+                rules=self.rules,
+                config=self.config,
+                api_token=self.config.api_token if self.config.api_auth_enabled else None
+            )
+            
+            self._api_thread = threading.Thread(
+                target=run_api_server,
+                kwargs={
+                    "app": app,
+                    "host": self.config.api_host,
+                    "port": self.config.api_port,
+                    "log_level": "warning"
+                },
+                daemon=True,
+                name="admin-api"
+            )
+            self._api_thread.start()
+            logger.info(f"✓ Admin API started on http://{self.config.api_host}:{self.config.api_port}")
+            self.runtime.add_log("INFO", f"Admin API started on port {self.config.api_port}")
+        except Exception as e:
+            logger.error(f"Failed to start Admin API: {e}")
+            self.runtime.add_log("ERROR", f"Admin API failed: {e}")
     
     def _setup_mqtt(self) -> None:
         """Setup MQTT client with LWT and callbacks."""
@@ -251,6 +299,8 @@ class GatewayService:
         """MQTT connect callback."""
         if rc == 0:
             logger.info("✓ MQTT connected")
+            self.runtime.set_mqtt_connected(True)
+            self.runtime.add_log("INFO", "MQTT connected")
             
             # Publish online status (retained)
             online_status = json.dumps({"up": True, "ts": now_ts()})
@@ -261,11 +311,15 @@ class GatewayService:
             logger.info(f"✓ Subscribed to {TOPIC_CMD_VALVE}")
         else:
             logger.error(f"MQTT connect failed with code {rc}")
+            self.runtime.set_mqtt_connected(False)
+            self.runtime.add_log("ERROR", f"MQTT connect failed (rc={rc})")
     
     def _on_mqtt_disconnect(self, client, userdata, rc):
         """MQTT disconnect callback."""
+        self.runtime.set_mqtt_connected(False)
         if rc != 0:
             logger.warning(f"MQTT unexpected disconnect (rc={rc}), will auto-reconnect")
+            self.runtime.add_log("WARNING", f"MQTT disconnected (rc={rc})")
         else:
             logger.info("MQTT disconnected")
     
@@ -278,6 +332,9 @@ class GatewayService:
             return
         
         logger.info(f"Received command: {payload}")
+        
+        # Increment command counter
+        self.runtime.inc_cmd()
         
         # Validate payload
         valid, reason = validate_cmd_payload(payload)
@@ -350,6 +407,9 @@ class GatewayService:
         # Update state cache
         self.state.update_from_data(data)
         
+        # Increment telemetry counter
+        self.runtime.inc_telemetry()
+        
         # Publish telemetry (non-retained)
         telemetry = {
             "flow": self.state.flow,
@@ -385,6 +445,9 @@ class GatewayService:
     
     def _publish_ack(self, cid: str, ok: bool, reason: str) -> None:
         """Publish command acknowledgment."""
+        # Increment ACK counter
+        self.runtime.inc_ack(ok)
+        
         ack = {
             "cid": cid,
             "ok": ok,
