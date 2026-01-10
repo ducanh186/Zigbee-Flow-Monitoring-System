@@ -456,22 +456,12 @@ class GatewayService:
             self._publish_ack(cid, False, rule_reason)
             return
         
-        # Send command to UART
+        # Send command to UART with retry
         cmd_line = make_cmd_line(payload)
-        logger.info(f"TX >>> {cmd_line.strip()}")  # Mức 1: Log TX rõ ràng
-        
-        if not self.uart.write_line(cmd_line):
-            logger.error(f"TX FAILED: uart.write_line() returned False")
-            self._publish_ack(cid, False, "uart_write_failed")
-            return
-        
-        logger.info(f"TX OK: Waiting ACK for cid={cid} (timeout={self.config.ack_timeout_s}s)")
-        
-        # Wait for ACK from UART
-        ack = self.ack_router.wait_for_ack(cid, timeout=self.config.ack_timeout_s)
+        ack = self._send_cmd_with_retry(cid, cmd_line, max_retries=2)
         
         if ack is None:
-            logger.warning(f"ACK timeout for cid={cid}")
+            logger.warning(f"ACK timeout for cid={cid} after retries")
             self._publish_ack(cid, False, "timeout")
             return
         
@@ -486,6 +476,40 @@ class GatewayService:
             self._publish_state()
         
         self._publish_ack(cid, ok, ack_reason)
+    
+    def _send_cmd_with_retry(self, cid: str, cmd_line: str, max_retries: int = 2) -> Optional[dict]:
+        """
+        Send command to UART with retry on timeout.
+        
+        Coordinator may miss bytes when its TX buffer is busy with debug output.
+        Adding small delay and retry helps reliability.
+        """
+        for attempt in range(max_retries + 1):
+            if attempt > 0:
+                logger.info(f"Retry #{attempt} for cid={cid}")
+                # Wait a bit before retry to let Coordinator settle
+                time.sleep(0.2)
+            
+            # Small delay before sending to let Coordinator finish any pending output
+            time.sleep(0.05)
+            
+            logger.info(f"TX >>> {cmd_line.strip()}")
+            
+            if not self.uart.write_line(cmd_line):
+                logger.error(f"TX FAILED: uart.write_line() returned False")
+                continue
+            
+            logger.info(f"TX OK: Waiting ACK for cid={cid} (timeout={self.config.ack_timeout_s}s)")
+            
+            # Wait for ACK
+            ack = self.ack_router.wait_for_ack(cid, timeout=self.config.ack_timeout_s)
+            
+            if ack is not None:
+                return ack
+            
+            logger.warning(f"ACK timeout for cid={cid} (attempt {attempt + 1}/{max_retries + 1})")
+        
+        return None
     
     def _uart_reader_loop(self) -> None:
         """Background thread reading from UART."""
@@ -600,8 +624,16 @@ class GatewayService:
         
         Coordinator ACK: {"id":123,"ok":true,"msg":"valve set","valve":"open"}
         Translated to:   {"cid":"xxx","ok":true,"reason":"valve set","valve":"open"}
+        
+        Note: id=0 means Coordinator failed to parse the command (corrupt RX).
         """
         logger.debug(f"RX @ACK: {ack}")
+        
+        # Check for parse error ACK (id=0 means Coordinator couldn't parse command)
+        if ack.get("id") == 0:
+            logger.warning(f"⚠ Coordinator ACK with id=0 - command was corrupted: {ack.get('msg', '?')}")
+            # Don't try to resolve - let it timeout and retry
+            return
         
         # Check if this is Coordinator format (has "id" field) or MQTT format (has "cid" field)
         if "id" in ack and "cid" not in ack:

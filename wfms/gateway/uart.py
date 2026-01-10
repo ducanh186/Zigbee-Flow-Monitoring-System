@@ -190,7 +190,14 @@ class RealUart(UartBase):
         return None
     
     def write_line(self, line: str) -> bool:
-        """Write a line to serial port."""
+        """
+        Write a line to serial port.
+        
+        Coordinator may have busy TX buffer, so we:
+        1. Drain any pending RX data first
+        2. Write with proper line ending
+        3. Flush and wait for transmission
+        """
         if not self._connected:
             return False
         
@@ -198,11 +205,23 @@ class RealUart(UartBase):
             if not self._serial:
                 return False
             try:
+                # Drain RX buffer to clear any partial data
+                # This helps prevent buffer corruption
+                if self._serial.in_waiting > 0:
+                    self._serial.read(self._serial.in_waiting)
+                
                 data = line.encode('utf-8')
                 if not data.endswith(b'\n'):
                     data += b'\n'
+                
+                # Write data
                 self._serial.write(data)
                 self._serial.flush()
+                
+                # Small delay to let Coordinator receive complete command
+                # before it starts outputting debug info again
+                time.sleep(0.02)
+                
                 return True
             except Exception as e:
                 logger.error(f"UART write error: {e}")
