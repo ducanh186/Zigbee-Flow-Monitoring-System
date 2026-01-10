@@ -27,7 +27,11 @@ import paho.mqtt.client as mqtt
 # Add parent to path for imports when running as module
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from common.proto import parse_uart_line, make_cmd_line, now_ts, validate_cmd_payload, translate_coordinator_ack
+from common.proto import (
+    parse_uart_line, make_cmd_line, now_ts, validate_cmd_payload, 
+    translate_coordinator_ack, translate_coordinator_data,
+    VALVE_COORD_TO_MQTT
+)
 from common.contract import (
     TOPIC_STATE, TOPIC_TELEMETRY, TOPIC_CMD_VALVE, TOPIC_ACK, 
     TOPIC_GATEWAY_STATUS, VALVE_ON, VALVE_OFF, update_site
@@ -48,10 +52,15 @@ logger = logging.getLogger("gateway")
 
 @dataclass
 class StateCache:
-    """Cached state from UART data."""
+    """Cached state from UART data (Coordinator format)."""
     flow: float = 0.0
     battery: int = 100
-    valve: str = "OFF"
+    valve: str = "OFF"  # MQTT format (ON/OFF)
+    mode: str = "auto"  # auto/manual
+    valve_path: str = "auto"  # auto/direct/binding
+    valve_known: bool = False
+    valve_node_id: str = ""
+    tx_pending: bool = False
     updated_at: int = 0
     
     def to_dict(self) -> dict:
@@ -59,17 +68,110 @@ class StateCache:
             "flow": self.flow,
             "battery": self.battery,
             "valve": self.valve,
+            "mode": self.mode,
+            "valvePath": self.valve_path,
+            "valveKnown": self.valve_known,
+            "valveNodeId": self.valve_node_id,
+            "txPending": self.tx_pending,
             "updatedAt": self.updated_at
         }
     
     def update_from_data(self, data: dict) -> None:
-        """Update state from @DATA payload."""
+        """
+        Update state from @DATA payload.
+        
+        Coordinator DATA format:
+        {"flow":150,"valve":"open","battery":85,"mode":"auto",...}
+        """
         if "flow" in data:
             self.flow = data["flow"]
         if "battery" in data:
             self.battery = data["battery"]
         if "valve" in data:
-            self.valve = data["valve"]
+            # Translate Coordinator format (open/closed) to MQTT (ON/OFF)
+            valve_state = data["valve"].lower()
+            self.valve = VALVE_COORD_TO_MQTT.get(valve_state, "OFF")
+        if "mode" in data:
+            self.mode = data["mode"]
+        if "valve_path" in data:
+            self.valve_path = data["valve_path"]
+        if "valve_known" in data:
+            self.valve_known = data["valve_known"]
+        if "valve_node_id" in data:
+            self.valve_node_id = data["valve_node_id"]
+        if "tx_pending" in data:
+            self.tx_pending = data["tx_pending"]
+        self.updated_at = now_ts()
+
+
+@dataclass
+class CoordinatorInfo:
+    """Cached info from @INFO message (heartbeat)."""
+    node_id: str = ""
+    eui64: str = ""
+    pan_id: str = ""
+    channel: int = 0
+    tx_power: int = 0
+    net_state: int = 0
+    uart_gateway: bool = False
+    mode: str = "auto"
+    valve_path: str = "auto"
+    valve_known: bool = False
+    valve_eui64: str = ""
+    valve_node_id: str = ""
+    bind_index: int = 0
+    uptime: int = 0
+    updated_at: int = 0
+    
+    def to_dict(self) -> dict:
+        return {
+            "nodeId": self.node_id,
+            "eui64": self.eui64,
+            "panId": self.pan_id,
+            "channel": self.channel,
+            "txPower": self.tx_power,
+            "netState": self.net_state,
+            "uartGateway": self.uart_gateway,
+            "mode": self.mode,
+            "valvePath": self.valve_path,
+            "valveKnown": self.valve_known,
+            "valveEui64": self.valve_eui64,
+            "valveNodeId": self.valve_node_id,
+            "bindIndex": self.bind_index,
+            "uptime": self.uptime,
+            "updatedAt": self.updated_at
+        }
+    
+    def update_from_info(self, info: dict) -> None:
+        """Update from @INFO payload."""
+        if "node_id" in info:
+            self.node_id = info["node_id"]
+        if "eui64" in info:
+            self.eui64 = info["eui64"]
+        if "pan_id" in info:
+            self.pan_id = info["pan_id"]
+        if "ch" in info:
+            self.channel = info["ch"]
+        if "tx_power" in info:
+            self.tx_power = info["tx_power"]
+        if "net_state" in info:
+            self.net_state = info["net_state"]
+        if "uart_gateway" in info:
+            self.uart_gateway = info["uart_gateway"]
+        if "mode" in info:
+            self.mode = info["mode"]
+        if "valve_path" in info:
+            self.valve_path = info["valve_path"]
+        if "valve_known" in info:
+            self.valve_known = info["valve_known"]
+        if "valve_eui64" in info:
+            self.valve_eui64 = info["valve_eui64"]
+        if "valve_node_id" in info:
+            self.valve_node_id = info["valve_node_id"]
+        if "bind_index" in info:
+            self.bind_index = info["bind_index"]
+        if "uptime" in info:
+            self.uptime = info["uptime"]
         self.updated_at = now_ts()
 
 
@@ -143,6 +245,7 @@ class GatewayService:
         
         # State
         self.state = StateCache()
+        self.coordinator_info = CoordinatorInfo()  # @INFO cache
         self.ack_router = AckRouter(default_timeout=config.ack_timeout_s)
         
         # Rules engine
@@ -399,17 +502,29 @@ class GatewayService:
                 self._handle_uart_data(payload)
             elif msg_type == "ACK":
                 self._handle_uart_ack(payload)
+            elif msg_type == "INFO":
+                self._handle_uart_info(payload)
             elif msg_type == "LOG":
-                logger.info(f"UART LOG: {payload}")
+                self._handle_uart_log(payload)
             elif msg_type == "ERR":
                 logger.warning(f"UART parse error: {payload}")
         
         logger.info("UART reader thread stopped")
     
     def _handle_uart_data(self, data: dict) -> None:
-        """Handle @DATA from UART."""
-        # Update state cache
+        """
+        Handle @DATA from UART (Coordinator format).
+        
+        Coordinator DATA: {"flow":150,"valve":"open","battery":85,"mode":"auto",...}
+        """
+        logger.debug(f"RX @DATA: {data}")
+        
+        # Update state cache (handles valve translation: open->ON, closed->OFF)
         self.state.update_from_data(data)
+        
+        # Also update mode in coordinator_info if present
+        if "mode" in data:
+            self.coordinator_info.mode = data["mode"]
         
         # Increment telemetry counter
         self.runtime.inc_telemetry()
@@ -418,6 +533,8 @@ class GatewayService:
         telemetry = {
             "flow": self.state.flow,
             "battery": self.state.battery,
+            "valve": self.state.valve,  # Already translated to ON/OFF
+            "mode": self.state.mode,
             "ts": now_ts()
         }
         self.mqtt_client.publish(
@@ -430,17 +547,59 @@ class GatewayService:
         # Publish state (retained)
         self._publish_state()
     
+    def _handle_uart_info(self, info: dict) -> None:
+        """
+        Handle @INFO from UART (Coordinator heartbeat).
+        
+        Coordinator INFO: {"node_id":"0x0000","eui64":"...","pan_id":"0xBEEF","ch":11,...}
+        """
+        logger.debug(f"RX @INFO: {info}")
+        
+        # Update coordinator info cache
+        self.coordinator_info.update_from_info(info)
+        
+        # Sync mode to state cache
+        if "mode" in info:
+            self.state.mode = info["mode"]
+        if "valve_path" in info:
+            self.state.valve_path = info["valve_path"]
+        if "valve_known" in info:
+            self.state.valve_known = info["valve_known"]
+        
+        # Log important info on first receive or significant changes
+        logger.info(f"Coordinator: node={info.get('node_id', '?')}, "
+                   f"pan={info.get('pan_id', '?')}, ch={info.get('ch', '?')}, "
+                   f"mode={info.get('mode', '?')}, uptime={info.get('uptime', '?')}s")
+    
+    def _handle_uart_log(self, log: dict) -> None:
+        """
+        Handle @LOG from UART (Coordinator event log).
+        
+        Coordinator LOG: {"tag":"NET","event":"formed","pan_id":"0xBEEF",...}
+        """
+        tag = log.get("tag", "???")
+        event = log.get("event", "")
+        logger.info(f"[Coordinator {tag}] {event}: {log}")
+        
+        # Add to runtime log
+        self.runtime.add_log(f"COORD_{tag}", f"{event}: {json.dumps(log)}")
+    
     def _handle_uart_ack(self, ack: dict) -> None:
-        """Handle @ACK from UART (Coordinator format)."""
-        # Coordinator format: {"id":123,"ok":true,"msg":"..."}
-        # Translate to MQTT format: {"cid":"xxx","ok":true,"reason":"..."}
+        """
+        Handle @ACK from UART (Coordinator format).
+        
+        Coordinator ACK: {"id":123,"ok":true,"msg":"valve set","valve":"open"}
+        Translated to:   {"cid":"xxx","ok":true,"reason":"valve set","valve":"open"}
+        """
+        logger.debug(f"RX @ACK: {ack}")
         
         # Check if this is Coordinator format (has "id" field) or MQTT format (has "cid" field)
         if "id" in ack and "cid" not in ack:
             # Coordinator format - translate
             mqtt_ack = translate_coordinator_ack(ack)
             cid = mqtt_ack.get("cid")
-            logger.debug(f"Translated Coordinator ACK id={ack.get('id')} -> cid={cid}")
+            logger.info(f"ACK from Coordinator: id={ack.get('id')} -> cid={cid}, "
+                       f"ok={ack.get('ok')}, msg={ack.get('msg', '')}")
         else:
             # Already MQTT format (from FakeUart)
             mqtt_ack = ack
