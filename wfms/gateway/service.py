@@ -37,7 +37,7 @@ from common.contract import (
     TOPIC_GATEWAY_STATUS, VALVE_ON, VALVE_OFF, update_site
 )
 from gateway.config import load_config, Config
-from gateway.uart import UartBase, RealUart, FakeUart
+from gateway.uart import UartBase, RealUart, FakeUart, extract_frames
 from gateway.rules import Rules, RulesConfig
 from gateway.runtime import RuntimeState
 
@@ -428,10 +428,14 @@ class GatewayService:
     
     def _on_mqtt_message(self, client, userdata, msg):
         """Handle incoming MQTT command messages."""
+        raw_payload = msg.payload.decode('utf-8')
+        logger.info(f"MQTT RAW <<< {repr(raw_payload)}")
+        
         try:
-            payload = json.loads(msg.payload.decode('utf-8'))
+            payload = json.loads(raw_payload)
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             logger.warning(f"Invalid JSON in command: {e}")
+            logger.warning(f"  Raw bytes: {msg.payload[:100]}")
             return
         
         logger.info(f"Received command: {payload}")
@@ -477,21 +481,23 @@ class GatewayService:
         
         self._publish_ack(cid, ok, ack_reason)
     
-    def _send_cmd_with_retry(self, cid: str, cmd_line: str, max_retries: int = 2) -> Optional[dict]:
+    def _send_cmd_with_retry(self, cid: str, cmd_line: str, max_retries: int = 3) -> Optional[dict]:
         """
         Send command to UART with retry on timeout.
         
         Coordinator may miss bytes when its TX buffer is busy with debug output.
-        Adding small delay and retry helps reliability.
+        We use longer delays and more retries to improve reliability.
+        
+        WARNING: Real fix requires disabling debug prints in Coordinator firmware.
         """
         for attempt in range(max_retries + 1):
             if attempt > 0:
                 logger.info(f"Retry #{attempt} for cid={cid}")
-                # Wait a bit before retry to let Coordinator settle
-                time.sleep(0.2)
+                # Longer wait before retry - let Coordinator finish output burst
+                time.sleep(0.3)
             
-            # Small delay before sending to let Coordinator finish any pending output
-            time.sleep(0.05)
+            # NOTE: write_line() now implements quiet window detection internally
+            # No need to sleep here - it waits for RX silence before sending
             
             logger.info(f"TX >>> {cmd_line.strip()}")
             
@@ -520,28 +526,41 @@ class GatewayService:
             if line is None:
                 continue
             
-            msg_type, payload = parse_uart_line(line)
+            # DEBUG: Log raw line received (helpful for diagnosing dính rác/ACK issues)
+            logger.info(f"[UART RX RAW] {line!r}")
             
-            if msg_type == "DATA":
-                self._handle_uart_data(payload)
-            elif msg_type == "ACK":
-                self._handle_uart_ack(payload)
-            elif msg_type == "INFO":
-                self._handle_uart_info(payload)
-            elif msg_type == "LOG":
-                self._handle_uart_log(payload)
-            elif msg_type == "ERR":
-                error = payload.get("error", "")
-                raw = payload.get("raw", "")
+            # Extract multiple frames from single line (handles @ACK/@INFO mid-line)
+            frames = extract_frames(line)
+            if not frames:
+                # No valid protocol frames found
+                logger.debug(f"[UART] No protocol frames in: {line[:60]}")
+                continue
+            
+            # Process each extracted frame
+            for frame in frames:
+                msg_type, payload = parse_uart_line(frame)
                 
-                # Check if this is a fragment (no prefix but looks like JSON)
-                if error == "unknown_prefix" and (raw.startswith('{') or raw.endswith('}')):
-                    logger.warning(f"⚠ UART FRAGMENT detected: '{raw[:50]}...' (possible buffer issue)")
-                elif error == "empty_line":
-                    # Empty lines are common noise, downgrade to debug
-                    logger.debug("UART: empty line")
-                else:
-                    logger.warning(f"UART parse error: {payload}")
+                if msg_type == "DATA":
+                    self._handle_uart_data(payload)
+                elif msg_type == "ACK":
+                    logger.info(f"RX @ACK frame: {frame}")
+                    self._handle_uart_ack(payload)
+                elif msg_type == "INFO":
+                    self._handle_uart_info(payload)
+                elif msg_type == "LOG":
+                    self._handle_uart_log(payload)
+                elif msg_type == "ERR":
+                    error = payload.get("error", "")
+                    raw = payload.get("raw", "")
+                    
+                    # Check if this is a fragment (no prefix but looks like JSON)
+                    if error == "unknown_prefix" and (raw.startswith('{') or raw.endswith('}')):
+                        logger.warning(f"⚠ UART FRAGMENT detected: '{raw[:50]}...' (possible buffer issue)")
+                    elif error == "empty_line":
+                        # Empty lines are common noise, downgrade to debug
+                        logger.debug("UART: empty line")
+                    else:
+                        logger.warning(f"UART parse error: {payload}")
         
         logger.info("UART reader thread stopped")
     

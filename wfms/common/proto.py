@@ -30,6 +30,9 @@ PREFIX_CMD = "@CMD"
 PREFIX_LOG = "@LOG"
 PREFIX_INFO = "@INFO"
 
+# Line ending for UART TX (CRLF works better with embedded CLI)
+UART_EOL = "\r\n"
+
 # CID to numeric ID tracking (for ACK matching)
 _cid_to_id: Dict[str, int] = {}
 _id_counter: int = 1
@@ -189,7 +192,9 @@ def make_cmd_line(cmd_dict: Dict[str, Any], operation: Optional[str] = None) -> 
                 coord_cmd[field] = cmd_dict[field]
         
         json_str = json.dumps(coord_cmd, separators=(',', ':'))
-        return f"{PREFIX_CMD} {json_str}\n"
+        # Use CLI "json" command format - works in both IDE and Gateway mode
+        # IMPORTANT: Use CRLF to match CLI behavior and avoid line dính
+        return f"json {json_str}{UART_EOL}"
     
     # MQTT valve command format (legacy)
     cid = cmd_dict.get("cid", "unknown")
@@ -209,7 +214,10 @@ def make_cmd_line(cmd_dict: Dict[str, Any], operation: Optional[str] = None) -> 
     }
     
     json_str = json.dumps(coord_cmd, separators=(',', ':'))
-    return f"{PREFIX_CMD} {json_str}\n"
+    # Use CLI "json" command format - CLI parses this and calls cmdHandleLine()
+    # This works in both IDE mode and Gateway mode without conflicts
+    # IMPORTANT: Use CRLF to match CLI behavior and avoid line dính
+    return f"json {json_str}{UART_EOL}"
 
 
 # ============================================================================

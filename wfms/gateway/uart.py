@@ -12,6 +12,7 @@ import queue
 import time
 import random
 import logging
+import re
 from abc import ABC, abstractmethod
 from typing import Optional, Callable
 
@@ -21,6 +22,122 @@ from common.proto import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Debug spam patterns to filter out (from Coordinator firmware)
+DEBUG_SPAM_PATTERNS = [
+    r'^\[TICK\]',                   # Heartbeat: "[TICK] alive" every 5s
+    r'^T\d{8}:RX len',              # ZCL stack: "T00000000:RX len 8..."
+    r'^T\d{8}:TX',                  # ZCL stack: "T00000000:TX..."
+    r'^LCD:',                       # LCD UI debug: "LCD: set_flow...", "LCD: RENDER..."
+    r'^Trust Center',               # Network: "Trust Center Join Handler..."
+    r'^Device Announce',            # Network: "Device Announce..."
+    r'^Processing message:',        # ZCL message processing
+    r'^NWK Steering',              # Network steering
+    r'^EMBER_',                     # Ember stack events
+    r'^pJoin',                      # Network join: "pJoin for 254 sec..."
+    r'^NWK Creator',                # Network: "NWK Creator Security..."
+    r'^\s*$',                       # Empty lines
+    r'^>$',                         # CLI prompt
+    r'^The argument',               # CLI error messages
+]
+
+# Compile regex patterns for efficiency
+_DEBUG_FILTERS = [re.compile(p) for p in DEBUG_SPAM_PATTERNS]
+
+# Protocol tokens for frame extraction (with space after prefix)
+PROTOCOL_TOKENS = ["@ACK ", "@INFO ", "@DATA ", "@LOG ", "@ERR ", "@CMD "]
+# Also match tokens without space (in case of compact JSON)
+PROTOCOL_TOKENS_COMPACT = ["@ACK{", "@INFO{", "@DATA{", "@LOG{", "@ERR{", "@CMD{"]
+
+
+def extract_frames(text: str) -> list:
+    """
+    Extract multiple protocol frames from a single line.
+    
+    Handles cases where tokens like @INFO/@ACK may appear mid-line
+    due to echo or buffer concatenation from Coordinator.
+    
+    Examples:
+        "xxx@INFO {...}yyy@ACK {...}" -> ["@INFO {...}", "@ACK {...}"]
+        "> @DATA {...}" -> ["@DATA {...}"]
+        "@ACK {...}" -> ["@ACK {...}"]
+    
+    Args:
+        text: Raw text that may contain multiple protocol frames
+        
+    Returns:
+        List of extracted frames (each starting with @PREFIX)
+    """
+    if not text:
+        return []
+    
+    s = text.strip()
+    
+    # Remove CLI prompt if present, e.g. "> @INFO {...}"
+    if s.startswith(">"):
+        s = s.lstrip("> ").strip()
+    
+    # Find all token positions (both with space and compact format)
+    all_tokens = PROTOCOL_TOKENS + PROTOCOL_TOKENS_COMPACT
+    idxs = []
+    
+    for tok in all_tokens:
+        start = 0
+        while True:
+            i = s.find(tok, start)
+            if i == -1:
+                break
+            # For compact tokens like "@ACK{", adjust to include just "@ACK"
+            if tok.endswith("{"):
+                idxs.append(i)
+            else:
+                idxs.append(i)
+            start = i + 1
+    
+    if not idxs:
+        # No protocol tokens found - return original if it looks like protocol
+        if s.startswith("@"):
+            return [s]
+        return []  # Pure garbage, skip
+    
+    # Sort and dedupe positions
+    idxs = sorted(set(idxs))
+    
+    # Extract frames between token positions
+    frames = []
+    for k, i in enumerate(idxs):
+        j = idxs[k + 1] if k + 1 < len(idxs) else len(s)
+        frame = s[i:j].strip()
+        if frame:
+            frames.append(frame)
+    
+    return frames
+
+
+def is_debug_spam(line: str) -> bool:
+    """
+    Check if a line is debug spam from Coordinator.
+    
+    Valid protocol lines start with: @DATA, @ACK, @INFO, @LOG, @CMD
+    Everything else is considered debug spam.
+    """
+    if not line:
+        return True
+    
+    # Valid protocol prefixes
+    if line.startswith(('@DATA', '@ACK', '@INFO', '@LOG', '@CMD')):
+        return False
+    
+    # Check against known spam patterns
+    for pattern in _DEBUG_FILTERS:
+        if pattern.match(line):
+            return True
+    
+    # Any line not starting with @ is likely debug spam
+    if not line.startswith('@'):
+        return True
+    
+    return False
 
 
 class UartBase(ABC):
@@ -73,6 +190,11 @@ class RealUart(UartBase):
     """
     Real UART implementation using pyserial.
     Features auto-reconnect on disconnect.
+    
+    TICK-SYNC WORKAROUND:
+    Coordinator sends [TICK] every 5 seconds. To avoid UART collision,
+    we track when last TICK was seen and send commands right after TICK
+    when we have ~4.9 seconds of safe window.
     """
     
     def __init__(self, port: str, baud: int = 115200, reconnect_interval: float = 3.0):
@@ -85,6 +207,10 @@ class RealUart(UartBase):
         self._connected = False
         self._lock = threading.Lock()
         self._reconnect_thread: Optional[threading.Thread] = None
+        
+        # TICK-sync: track last TICK time for safe TX window
+        self._last_tick_time = 0.0
+        self._tick_interval = 5.0  # Coordinator sends TICK every 5s
     
     def start(self) -> None:
         """Start UART connection."""
@@ -125,9 +251,14 @@ class RealUart(UartBase):
                 self._serial = serial.Serial(
                     port=self.port,
                     baudrate=self.baud,
-                    timeout=0.1,  # Non-blocking read
+                    timeout=0.05,  # Faster read cycles
                     write_timeout=1.0
                 )
+                # Increase buffer size to prevent overrun (Windows)
+                try:
+                    self._serial.set_buffer_size(rx_size=8192, tx_size=4096)
+                except AttributeError:
+                    pass  # Not all pyserial versions support this
                 self._connected = True
                 logger.info(f"UART connected: {self.port} @ {self.baud}")
                 return True
@@ -149,6 +280,7 @@ class RealUart(UartBase):
         Read a line from serial port.
         
         Handles fragmentation by maintaining a persistent buffer across calls.
+        Filters out debug spam from Coordinator firmware.
         """
         if not self._connected:
             return None
@@ -164,10 +296,12 @@ class RealUart(UartBase):
                 if not self._serial:
                     return None
                 try:
-                    # Read available data
-                    chunk = self._serial.read(256)
-                    if chunk:
-                        self._line_buffer += chunk
+                    # Read ALL available data at once to prevent buffer overflow
+                    bytes_available = self._serial.in_waiting
+                    if bytes_available > 0:
+                        chunk = self._serial.read(bytes_available)
+                        if chunk:
+                            self._line_buffer += chunk
                     
                     # Check if we have a complete line
                     if b'\n' in self._line_buffer:
@@ -175,9 +309,25 @@ class RealUart(UartBase):
                         line_str = line.decode('utf-8', errors='replace').strip()
                         
                         # Filter out empty lines and CR-only lines
-                        if line_str and line_str != '\r':
-                            return line_str
-                        # Continue reading if empty
+                        if not line_str or line_str == '\r':
+                            continue
+                        
+                        # Log ALL received lines for debugging
+                        logger.info(f"[UART RX RAW] {repr(line_str)}")
+                        
+                        # TICK-sync: track [TICK] arrival time for safe TX window
+                        if '[TICK]' in line_str:
+                            self._last_tick_time = time.time()
+                            logger.debug(f"[UART] TICK detected, safe TX window opened")
+                        
+                        # Filter out debug spam
+                        if is_debug_spam(line_str):
+                            logger.debug(f"[UART] Filtered debug: {line_str}")
+                            continue  # Skip this line, read next one
+                        
+                        # Valid protocol line
+                        logger.info(f"[UART RX VALID] {line_str}")
+                        return line_str
                         
                 except Exception as e:
                     logger.error(f"UART read error: {e}")
@@ -185,7 +335,8 @@ class RealUart(UartBase):
                     self._line_buffer = b""
                     return None
             
-            time.sleep(0.01)
+            # Small sleep to prevent CPU spinning (removed old 10ms delay)
+            time.sleep(0.002)
         
         return None
     
@@ -193,10 +344,13 @@ class RealUart(UartBase):
         """
         Write a line to serial port.
         
-        Coordinator may have busy TX buffer, so we:
-        1. Drain any pending RX data first
-        2. Write with proper line ending
-        3. Flush and wait for transmission
+        Strategy to avoid UART collision:
+        1. Wait for quiet window (no RX activity for 200ms)
+        2. Clear input buffer completely
+        3. Write entire command atomically
+        4. Wait for transmission complete
+        
+        NOTE: TICK-sync disabled because [TICK] is now suppressed in Gateway mode.
         """
         if not self._connected:
             return False
@@ -205,22 +359,43 @@ class RealUart(UartBase):
             if not self._serial:
                 return False
             try:
-                # Drain RX buffer to clear any partial data
-                # This helps prevent buffer corruption
-                if self._serial.in_waiting > 0:
-                    self._serial.read(self._serial.in_waiting)
+                # Wait for quiet window - 200ms of silence before sending
+                quiet_window = 0.20  # 200ms
+                quiet_deadline = time.time() + 1.5  # Max 1.5s wait
+                last_check_waiting = self._serial.in_waiting
+                last_rx_time = time.time()
                 
+                while time.time() < quiet_deadline:
+                    current_waiting = self._serial.in_waiting
+                    if current_waiting > last_check_waiting:
+                        # New data arrived, drain it and reset timer
+                        self._serial.read(current_waiting)
+                        last_rx_time = time.time()
+                        last_check_waiting = 0
+                    elif (time.time() - last_rx_time) >= quiet_window:
+                        # Found quiet window
+                        logger.debug(f"[UART TX] Found quiet window after {time.time() - last_rx_time:.3f}s")
+                        break
+                    time.sleep(0.01)
+                
+                # Clear input buffer completely before sending
+                self._serial.reset_input_buffer()
+                time.sleep(0.02)  # Small delay after buffer clear
+                
+                # Encode entire line (atomic)
                 data = line.encode('utf-8')
                 if not data.endswith(b'\n'):
                     data += b'\n'
                 
-                # Write data
+                # Write entire command in one call
                 self._serial.write(data)
                 self._serial.flush()
                 
-                # Small delay to let Coordinator receive complete command
-                # before it starts outputting debug info again
-                time.sleep(0.02)
+                # Debug: Log what we wrote
+                logger.info(f"[UART TX] Wrote {len(data)} bytes: {data[:80]}")
+                
+                # Wait for transmission to complete before returning
+                time.sleep(0.10)  # 100ms wait (longer for safety)
                 
                 return True
             except Exception as e:

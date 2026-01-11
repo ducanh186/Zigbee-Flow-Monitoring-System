@@ -26,7 +26,7 @@ static bool isDuplicateCmd(uint32_t id)
   
   // Check if same ID within dedup window
   if (id == s_lastCmdId && (now - s_lastCmdTick) < CMD_DEDUP_WINDOW_MS) {
-    emberAfCorePrintln("CMD: Duplicate ID %lu ignored", (unsigned long)id);
+    appLogLog("CMD", "duplicate", "\"id\":%lu,\"ignored\":true", (unsigned long)id);
     return true;
   }
   
@@ -228,7 +228,7 @@ void cli_json_command(sl_cli_command_arg_t *arguments)
   // Get the JSON string argument
   char *json_arg = sl_cli_get_argument_string(arguments, 0);
   if (!json_arg || json_arg[0] == '\0') {
-    emberAfCorePrintln("Usage: json {\"id\":N,\"op\":\"...\"}");
+    appLogLog("CMD", "cli_usage", "\"msg\":\"json {\\\"id\\\":N,\\\"op\\\":\\\"...\\\"}\"");
     return;
   }
   
@@ -236,7 +236,7 @@ void cli_json_command(sl_cli_command_arg_t *arguments)
   static char cmdBuf[256];
   int n = snprintf(cmdBuf, sizeof(cmdBuf), "@CMD %s", json_arg);
   if (n < 0 || (size_t)n >= sizeof(cmdBuf)) {
-    emberAfCorePrintln("json: command too long");
+    appLogLog("CMD", "cli_error", "\"msg\":\"command too long\"");
     return;
   }
   
