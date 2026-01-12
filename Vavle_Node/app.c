@@ -1,12 +1,18 @@
 #include "app/framework/include/af.h"
 #include "network-steering.h"
 #include "sl_simple_led_instances.h"
+#include "sl_simple_button_instances.h"
+#include "app_button_press.h"
 #include "zap-id.h"
 #include "stack/include/ember.h"
 
 void emberAfMainInitCallback(void)
 {
   emberAfCorePrintln("Valve init: RxOnWhenIdle=1 -> start steering");
+  
+  // Enable button press callbacks (disabled by default)
+  app_button_press_enable();
+  
   if (emberAfNetworkState() != EMBER_JOINED_NETWORK) {
     EmberStatus st = emberAfPluginNetworkSteeringStart();
     emberAfCorePrintln("Steering start: 0x%02X", st);
@@ -70,4 +76,32 @@ bool emberAfPreCommandReceivedCallback(EmberAfClusterCommand *cmd)
 void emberAfRadioNeedsCalibratingCallback(void)
 {
   sl_mac_calibrate_current_channel();
+}
+
+/******************************************************************************
+ * app_button_press Callback
+ * Được gọi khi button được ấn với các loại thời gian khác nhau
+ * button: 0 = BTN0, 1 = BTN1
+ * duration: APP_BUTTON_PRESS_DURATION_SHORT, MEDIUM, LONG, VERYLONG
+ *****************************************************************************/
+void app_button_press_cb(uint8_t button, uint8_t duration)
+{
+  emberAfCorePrintln("Button %d pressed, duration %d", button, duration);
+
+  // PB1 (button == 1): Start network steering (join network)
+  // Tương đương với CLI: plugin network-steering start 0
+  if (button == 1) {
+    if (emberAfNetworkState() == EMBER_JOINED_NETWORK) {
+      emberAfCorePrintln("Already joined network, ignoring PB1");
+      return;
+    }
+    
+    emberAfCorePrintln("PB1: Starting network steering...");
+    EmberStatus st = emberAfPluginNetworkSteeringStart();
+    if (st == EMBER_SUCCESS) {
+      emberAfCorePrintln("Network steering started successfully");
+    } else {
+      emberAfCorePrintln("Network steering start failed: 0x%02X", st);
+    }
+  }
 }

@@ -15,42 +15,21 @@ This project implements a complete Zigbee-based flow monitoring solution with th
 
 ```
 Zigbee-Flow-Monitoring-System/
-├── Coordinator_Node/           # Zigbee coordinator firmware (C)
-│   ├── app/                   # Application logic
-│   │   ├── app.c             # Main application
-│   │   ├── uart_link.c       # UART communication
-│   │   ├── net_mgr.c         # Network management
-│   │   ├── valve_ctrl.c      # Valve control logic
-│   │   ├── telemetry_rx.c    # Telemetry receiver
-│   │   ├── cmd_handler.c     # Command handler
-│   │   └── lcd_ui.c          # LCD display interface
-│   ├── main.c                # Entry point
-│   └── INSTALLED_COMPONENTS.md
-├── Sensor_Node/               # Flow sensor firmware (C)
-│   ├── app.c                 # Sensor application
-│   ├── main.c                # Entry point
-│   └── README.md
-├── Vavle_Node/               # Valve actuator firmware (C)
-│   ├── app.c                 # Valve application
-│   ├── main.c                # Entry point
-│   └── README.md
-├── Dashboard_Coordinator/     # PC Dashboard (Python)
-│   ├── dashboard.py          # Streamlit UI
-│   ├── pc_gateway.py         # Serial gateway service
-│   ├── preview.html          # UI preview
-│   ├── requirements.txt      # Python dependencies
-│   └── README.md
-├── Gate_Way_Z3/              # MQTT Gateway integration
-│   └── gateway_mqtt.py       # MQTT bridge
-├── file_project/             # Simplicity Studio project files
-│   ├── Coordinator_Node.sls
-│   ├── Sensor node.sls
-│   └── Valve_node.sls
-├── doc/                      # Documentation
-│   └── CLI_COMMANDS_REFERENCE.md
-├── run_dashboard.bat         # Quick start script
-├── setup_firewall.ps1        # Firewall configuration
-└── README.md                 # This file
+├── Coordinator_Node/        # Zigbee coordinator firmware (C, EFR32)
+│   ├── app/                 # Application logic (UART, network, valve, CLI, ...)
+│   └── main.c               # Entry point
+├── Sensor_Node/             # Flow sensor firmware (C)
+├── Vavle_Node/              # Valve actuator firmware (C)
+├── wfms/                    # MQTT gateway + dashboards (Python)
+│   ├── common/              # Protocol & MQTT contract
+│   ├── gateway/             # UART↔MQTT service + Admin API
+│   └── dashboards/          # Admin/User web dashboards (Streamlit)
+├── tools/                   # PC utilities (MQTT, serial, setup scripts)
+├── docs/                    # Project documentation (CLI, conventions, MQTT)
+├── file_project/            # Simplicity Studio .sls projects
+├── mosquitto_data/          # Mosquitto persistence data (Windows service)
+├── archive/                 # Legacy dashboards & experimental code
+└── README.md                # This file
 ```
 
 ## 🚀 Quick Start
@@ -73,142 +52,185 @@ Zigbee-Flow-Monitoring-System/
 # - Valve_node.sls → Valve board
 ```
 
-### 2. Install Dashboard Dependencies
+### 2. Install Gateway & Dashboard Dependencies
 
 ```bash
-cd Dashboard_Coordinator
+cd wfms
 pip install -r requirements.txt
 ```
 
-### 3. Run Dashboard
+### 3. Run Dashboard (MQTT-based, PC A ↔ PC B)
 
-**Windows:**
-```bash
-run_dashboard.bat
+#### A. Manual quick procedure every time PC A boots
+
+1) **Check Radmin VPN**
+
+- Open Radmin VPN on PC A and ensure the status is **Connected**.
+- Note the virtual IP of PC A (for example `26.188.98.128`; this may change).
+
+2) **Check Mosquitto (MQTT broker)**
+
+In an elevated PowerShell window on PC A:
+
+```powershell
+Get-Service mosquitto
 ```
 
-**Manual:**
-```bash
-cd Dashboard_Coordinator
-streamlit run dashboard.py
+- If the service is not `Running`, start it:
+
+```powershell
+Start-Service mosquitto
 ```
 
-- Browser opens automatically
-- Select COM port in sidebar
-- Click "Connect"
-- Dashboard updates in real-time
+- Verify the broker is listening on port `1883`:
+
+```powershell
+netstat -ano | findstr :1883
+```
+
+You should see `26.188.98.128:1883 LISTENING` and/or `0.0.0.0:1883 LISTENING`.
+
+3) **Start Gateway (UART↔MQTT bridge)**
+
+In PowerShell on PC A:
+
+```powershell
+cd "C:\Users\Admin\Downloads\Zigbee-Flow-Monitoring-System-main\Zigbee-Flow-Monitoring-System-main"
+& ".\wfms\gateway\.venv\Scripts\python.exe" -m wfms.gateway.service
+```
+
+Healthy signs:
+- `UART connected: COM4 @ 115200`
+- `✓ MQTT connected`
+- Subscription logs like `subscribe wfms/lab1/cmd/...`
+- Continuous `@DATA` / `@INFO` frames in the log
+
+4) **Start Web Admin (Streamlit dashboard)**
+
+Open another PowerShell window on PC A:
+
+```powershell
+cd "C:\Users\Admin\Downloads\Zigbee-Flow-Monitoring-System-main\Zigbee-Flow-Monitoring-System-main"
+& ".\wfms\gateway\.venv\Scripts\python.exe" -m streamlit run \
+  ".\wfms\dashboards\admin\admin_dashboard.py" \
+  --server.address 0.0.0.0 --server.port 8501
+```
+
+- If you also run a separate **user dashboard**, start it on another port, for example `8502`.
+
+5) **PC B accesses the web dashboard**
+
+On PC B (any network, as long as Radmin VPN is connected):
+
+- Open the Admin dashboard in a browser:
+  - `http://26.188.98.128:8501` (replace with PC A's current Radmin IP)
+
+- Quick connectivity tests from PC B (PowerShell):
+
+```powershell
+Test-NetConnection 26.188.98.128 -Port 8501
+Test-NetConnection 26.188.98.128 -Port 1883
+```
+
+#### B. One-time setup (auto-start on boot)
+
+1) **Disable Sleep / Hibernate**
+
+- In Windows power settings on PC A, set **Sleep = Never** (when plugged in).
+
+2) **Configure Mosquitto to auto-start**
+
+You already did:
+
+```powershell
+Set-Service mosquitto -StartupType Automatic
+```
+
+3) **Create two .bat files for auto-run**
+
+Create `start_gateway.bat`:
+
+```bat
+@echo off
+cd /d "C:\Users\Admin\Downloads\Zigbee-Flow-Monitoring-System-main\Zigbee-Flow-Monitoring-System-main"
+.\wfms\gateway\.venv\Scripts\python.exe -m wfms.gateway.service
+```
+
+Create `start_admin_ui.bat`:
+
+```bat
+@echo off
+cd /d "C:\Users\Admin\Downloads\Zigbee-Flow-Monitoring-System-main\Zigbee-Flow-Monitoring-System-main"
+.\wfms\gateway\.venv\Scripts\python.exe -m streamlit run \
+  ".\wfms\dashboards\admin\admin_dashboard.py" \
+  --server.address 0.0.0.0 --server.port 8501
+```
+
+4) **Create two Task Scheduler tasks**
+
+- Task 1: Trigger **At log on** (or **At startup**), Action = run `start_gateway.bat`.
+- Task 2: Trigger **At log on** (or **At startup**), Action = run `start_admin_ui.bat`.
+- In both tasks, tick **Run with highest privileges**.
+
+From now on, after you power on PC A and log in, the gateway and web dashboard start automatically.
+
+#### C. If something is broken, check in this order
+
+1) **MQTT broker** — on PC A:
+
+```powershell
+Get-Service mosquitto
+```
+
+Ensure the service is running.
+
+2) **Gateway logs** — confirm both `✓ MQTT connected` and `UART connected` appear.
+
+3) **Streamlit logs** — ensure you see:
+
+```text
+Running on http://0.0.0.0:8501
+```
+
+Optionally, you can create a `start_all.bat` script that opens two separate windows (gateway + web Admin) so you can start everything with a single double‑click.
 
 ## 📡 Communication Protocol
 
-The system uses a text-based protocol over UART (115200 baud):
+Data between the Coordinator and PC uses a simple text protocol over UART (115200 bps), and the gateway mirrors it to MQTT topics.
 
-### Coordinator → PC (Telemetry Data)
-```
-@DATA {"v":1,"flow":120,"battery":90,"valve":"open"}
-```
+- Frame format: `@TYPE {JSON}\r\n` (CRLF line ending)
+- `@DATA` – telemetry, `@CMD` – commands, `@ACK` – acknowledgments
 
-### PC → Coordinator (Commands)
-```
-@CMD {"id":1,"op":"valve_set","value":"open"}
-@CMD {"id":2,"op":"threshold_set","close_th":80,"open_th":20}
-```
+Examples:
 
-### Coordinator → PC (Acknowledgments)
-```
-@ACK {"id":1,"ok":true,"msg":"valve opened","valve":"open"}
+```text
+@DATA {"flow":120,"battery":90,"valve":"open"}
+@CMD  {"id":1,"op":"valve_set","value":"open"}
+@ACK  {"id":1,"ok":true,"msg":"valve opened"}
 ```
 
 ## 🎨 Dashboard Features
 
-### 1. Real-time Metric Cards
-- **Flow Monitor**: Dynamic color-coded display with status indicators (HIGH/NORMAL/LOW)
-- **Battery Status**: Progress bar with percentage and low-battery warnings
-- **Valve Control**: Real-time valve status with OPEN/CLOSE toggle buttons
+Both the legacy serial dashboard and the new MQTT-based Admin/User dashboards provide:
 
-### 2. Data Visualization
-- **Live Chart (5 min)**: Real-time flow and battery readings with threshold lines
-- **Hourly Analytics**: Average/Max/Min flow values for the last 24 hours
-- **Daily Summary**: Bar chart showing average flow per day over 30 days
-- **Historical Data**: SQLite database with full telemetry history
-
-### 3. Control Interface
-- **Connection Manager**: COM port selection and connection status
-- **Threshold Configuration**: Set automatic valve control thresholds (close_th, open_th)
-- **Manual Valve Override**: Direct valve control bypassing auto mode
-- **Auto Refresh**: Configurable update interval (1-10 seconds)
+- Real-time cards for flow, battery level, and valve state
+- Live charts plus historical analytics (minutes → days)
+- Manual and automatic valve control with configurable thresholds
+- Connection status, logs, and basic diagnostics for quick troubleshooting
 
 ## ⚙️ System Architecture
 
-```
-┌─────────────┐     Zigbee      ┌─────────────┐
-│ Sensor Node │───────────────▶│  Coordinator│
-│ (Flow+Batt) │                 │    Node     │
-└─────────────┘                 └──────┬──────┘
-                                       │ UART
-┌─────────────┐     Zigbee             │
-│ Valve Node  │◀───────────────────┬──┘
-│ (Actuator)  │                     │
-└─────────────┘                     │
-                            ┌──────▼──────┐
-                            │ PC Gateway  │
-                            │  (Serial)   │
-                            └──────┬──────┘
-                                   │
-                            ┌──────▼──────┐
-                            │  Dashboard  │
-                            │  (Streamlit)│
-                            └─────────────┘
-```
+High-level data flow:
 
-### Data Flow
-1. **Sensor → Coordinator**: Flow and battery telemetry via Zigbee
-2. **Coordinator → PC**: Aggregated data via UART (@DATA messages)
-3. **PC → Coordinator**: Commands via UART (@CMD messages)
-4. **Coordinator → Valve**: Control commands via Zigbee
-5. **All Nodes → PC**: Acknowledgments and status updates
+1. Sensor Node → Coordinator over Zigbee (flow + battery)
+2. Coordinator ↔ Gateway PC over UART (`@DATA`, `@CMD`, `@ACK` frames)
+3. Gateway service ↔ MQTT broker (`wfms/{SITE}/...` topics)
+4. Dashboards and external systems ↔ MQTT + Admin API for monitoring and control
 
-## 🔧 Firmware Components
+Simplified view:
 
-### Coordinator Node
-- **Network Manager** (`net_mgr.c`): Zigbee network setup and device management
-- **UART Link** (`uart_link.c`): Serial communication with PC
-- **Command Handler** (`cmd_handler.c`): Process PC commands
-- **Telemetry Receiver** (`telemetry_rx.c`): Collect sensor data
-- **Valve Controller** (`valve_ctrl.c`): Automatic valve control logic
-- **LCD UI** (`lcd_ui.c`): Local display interface
-- **CLI Commands** (`cli_commands.c`): Debug console interface
-
-### Sensor Node
-- Flow sensor reading and calibration
-- Battery voltage monitoring
-- Periodic Zigbee transmission
-- Low-power sleep modes
-
-### Valve Node
-- Stepper motor or solenoid valve control
-- Remote command processing
-- Status reporting
-- Fail-safe mechanisms
-
-# 1. Start Mosquitto broker (if not running)
-```bash
-# 1. Start Mosquitto broker (if not running)
-net start mosquitto
-
-# Or:
-"C:\Program Files\mosquitto\mosquitto.exe" -v
-```
-
-# 2. Start gateway (owns COM13)
-
-```bash
-.\run_gateway.bat
-```
-# 3. Start dashboard (one or more instances)
-
-
-```bash
-.\run_dashboard_mqtt.bat
+```text
+Sensor / Valve Nodes ⇄ Coordinator ⇄ UART ⇄ Gateway (WFMS) ⇄ MQTT ⇄ Dashboards / Clients
 ```
 ## 🧪 Development & Testing
 
