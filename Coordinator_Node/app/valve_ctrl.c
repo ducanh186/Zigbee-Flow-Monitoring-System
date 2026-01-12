@@ -170,12 +170,14 @@ bool emberAfMessageSentCallback(EmberOutgoingMessageType type,
 
   if (apsFrame->clusterId == ZCL_ON_OFF_CLUSTER_ID && apsFrame->sourceEndpoint == COORD_EP_CONTROL) {
     if (g_tx.active) {
-      emberAfCorePrintln(
-        "@LOG {\"event\":\"tx_done\",\"id\":%lu,\"st\":\"0x%02X\",\"path\":\"%s\",\"dst_or_index\":\"0x%04X\"}",
+      // Use structured logging with appLogLog
+      appLogLog("ZB", status == EMBER_SUCCESS ? "tx_done" : "tx_fail",
+        "\"id\":%lu,\"zstatus\":\"0x%02X\",\"path\":\"%s\",\"dst\":\"0x%04X\",\"want\":\"%s\"",
         (unsigned long)g_tx.cmdId,
         (unsigned)status,
         g_tx.usedDirect ? "direct" : "binding",
-        (unsigned)g_tx.dstOrIndex
+        (unsigned)g_tx.dstOrIndex,
+        g_tx.wantOpen ? "open" : "close"
       );
 
       if (status == EMBER_SUCCESS) {
@@ -201,15 +203,31 @@ void emberAfTrustCenterJoinCallback(EmberNodeId newNodeId,
   (void)parentOfNewNode;
   (void)decision;
 
-  if (!g_valveKnown) return;  // newNodeEui64 is not NULL (it's an array param)
+#ifdef DEBUG_NET_PRINTS
+  // Log all TC join events for debugging
+  char euiStr[17];
+  for (int i = 0; i < 8; i++) {
+    sprintf(&euiStr[i * 2], "%02X", newNodeEui64[i]);
+  }
+  euiStr[16] = '\0';
+
+  appLogLog("NET", "tc_join",
+    "\"node_id\":\"0x%04X\",\"eui64\":\"%s\",\"status\":%u,\"decision\":%u",
+    (unsigned)newNodeId, euiStr, (unsigned)status, (unsigned)decision
+  );
+#endif
+
+  if (!g_valveKnown) return;
 
   if (memcmp(newNodeEui64, g_valveEuiLe, EUI64_SIZE) == 0) {
     g_valveNodeId = newNodeId;
     (void)emberSetBindingRemoteNodeId(g_valveBindIndex, newNodeId);
 
-    emberAfCorePrintln("@LOG {\"event\":\"valve_nodeid_update\",\"node_id\":\"0x%04X\",\"status\":%u}",
-                       (uint16_t)newNodeId, (unsigned)status);
-    printInfoToPC();
+    appLogLog("ZB", "valve_nodeid_update",
+      "\"node_id\":\"0x%04X\",\"status\":%u",
+      (unsigned)newNodeId, (unsigned)status
+    );
+    appLogInfo();
   }
 }
 

@@ -9,7 +9,7 @@ import paho.mqtt.client as mqtt
 # ======================
 # CONFIG
 # ======================
-SERIAL_PORT = "COM7"
+SERIAL_PORT = "COM13"
 BAUDRATE = 115200
 
 BROKER_HOST = "YOUR_BROKER_HOST"

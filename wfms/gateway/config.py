@@ -17,7 +17,7 @@ class Config(BaseSettings):
     """
     
     # UART Configuration
-    uart_port: str = Field(default="COM7", description="Serial port for Zigbee Coordinator")
+    uart_port: str = Field(default="COM13", description="Serial port for Zigbee Coordinator")
     uart_baud: int = Field(default=115200, description="Serial baud rate")
     
     # MQTT Configuration
@@ -36,8 +36,20 @@ class Config(BaseSettings):
     rule_dedupe_ttl_s: int = Field(default=60, description="Deduplication TTL in seconds")
     ack_timeout_s: int = Field(default=3, description="ACK timeout in seconds")
     
+    # TX Pacing Configuration (Fix UART corruption)
+    uart_tx_chunk_size: int = Field(default=8, description="Chunk size for TX pacing (0=disabled)")
+    uart_tx_chunk_delay_ms: int = Field(default=10, description="Delay between TX chunks in ms")
+    uart_tx_char_delay_ms: int = Field(default=0, description="Per-char delay in ms (0=use chunk mode)")
+    
+    # Retry Backoff Configuration
+    cmd_retry_base_delay_s: float = Field(default=0.3, description="Base delay before retry")
+    cmd_retry_max_delay_s: float = Field(default=1.2, description="Max retry delay cap")
+    cmd_retry_jitter_s: float = Field(default=0.2, description="Random jitter for retry")
+    
     # Admin API Configuration
+    api_host: str = Field(default="127.0.0.1", description="Local Admin API host (localhost only!)")
     api_port: int = Field(default=8080, description="Local Admin API port")
+    api_token: Optional[str] = Field(default="", description="Admin API token (empty to disable auth)")
     
     # Logging Configuration
     log_level: str = Field(default="INFO", description="Log level")
@@ -67,6 +79,15 @@ class Config(BaseSettings):
             raise ValueError("Port must be between 1 and 65535")
         return v
     
+    @field_validator("api_host")
+    @classmethod
+    def validate_api_host(cls, v: str) -> str:
+        """Validate API host is localhost for security."""
+        allowed = ("127.0.0.1", "localhost", "::1")
+        if v not in allowed:
+            raise ValueError(f"API_HOST must be one of {allowed} for security")
+        return v
+    
     @field_validator("rule_lock")
     @classmethod
     def validate_lock(cls, v: int) -> int:
@@ -94,6 +115,11 @@ class Config(BaseSettings):
     def mqtt_auth_enabled(self) -> bool:
         """Check if MQTT authentication is configured."""
         return bool(self.mqtt_user and self.mqtt_pass)
+    
+    @property
+    def api_auth_enabled(self) -> bool:
+        """Check if Admin API token authentication is configured."""
+        return bool(self.api_token)
 
 
 def load_config(env_path: Optional[str] = None) -> Config:

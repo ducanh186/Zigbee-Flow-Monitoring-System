@@ -20,3 +20,4 @@ pydantic>=2.0.0,<3.0.0
 
 # Pydantic settings (for config management)
 pydantic-settings>=2.0.0,<3.0.0
+

@@ -108,31 +108,43 @@ static void drawFrame(void)
 
 bool lcdUiInit(void)
 {
-  emberAfCorePrintln("LCD: lcdUiInit() s_ready=%d", s_ready);
+#ifdef DEBUG_LCD_PRINTS
+  emberAfCorePrintln("@LOG {\"src\":\"LCD\",\"event\":\"init_start\",\"s_ready\":%d}", s_ready);
+#endif
   
   if (s_ready) {
-    emberAfCorePrintln("LCD: already inited");
+#ifdef DEBUG_LCD_PRINTS
+    emberAfCorePrintln("@LOG {\"src\":\"LCD\",\"event\":\"already_inited\"}");
+#endif
     return true;
   }
 
   // CRITICAL: Enable display power via GPIO PD15
   GPIO_PinModeSet(gpioPortD, 15, gpioModePushPull, 1);
-  emberAfCorePrintln("LCD: GPIO PD15 enabled");
+#ifdef DEBUG_LCD_PRINTS
+  emberAfCorePrintln("@LOG {\"src\":\"LCD\",\"event\":\"gpio_enabled\",\"pin\":\"PD15\"}");
+#endif
 
   // Init DMD
   EMSTATUS dmdStatus = DMD_init(0);
-  emberAfCorePrintln("LCD: DMD_init()=0x%X", dmdStatus);
+#ifdef DEBUG_LCD_PRINTS
+  emberAfCorePrintln("@LOG {\"src\":\"LCD\",\"event\":\"dmd_init\",\"status\":\"0x%X\"}", dmdStatus);
+#endif
   if (dmdStatus != DMD_OK) {
-    emberAfCorePrintln("LCD: DMD FAIL!");
+    // Keep error log always enabled
+    emberAfCorePrintln("@LOG {\"src\":\"LCD\",\"event\":\"dmd_fail\",\"status\":\"0x%X\"}", dmdStatus);
     s_ready = false;
     return false;
   }
 
   // Init GLIB
   EMSTATUS glibStatus = GLIB_contextInit(&s_glib);
-  emberAfCorePrintln("LCD: GLIB_contextInit()=0x%X", glibStatus);
+#ifdef DEBUG_LCD_PRINTS
+  emberAfCorePrintln("@LOG {\"src\":\"LCD\",\"event\":\"glib_init\",\"status\":\"0x%X\"}", glibStatus);
+#endif
   if (glibStatus != GLIB_OK) {
-    emberAfCorePrintln("LCD: GLIB FAIL!");
+    // Keep error log always enabled
+    emberAfCorePrintln("@LOG {\"src\":\"LCD\",\"event\":\"glib_fail\",\"status\":\"0x%X\"}", glibStatus);
     s_ready = false;
     return false;
   }
@@ -160,7 +172,9 @@ bool lcdUiInit(void)
   
   s_ready = true;
   s_ui.dirty = false;  // Already drawn
-  emberAfCorePrintln("LCD: init OK");
+#ifdef DEBUG_LCD_PRINTS
+  emberAfCorePrintln("@LOG {\"src\":\"LCD\",\"event\":\"init_ok\"}");
+#endif
   return true;
 }
 
@@ -197,7 +211,9 @@ void lcdUiOverlayTag(const char *tag)
 // ===== REALTIME DATA UPDATE =====
 void lcd_ui_set_flow(uint16_t flow)
 {
-  emberAfCorePrintln("LCD: set_flow(%u) ready=%d", flow, s_ready);
+#ifdef DEBUG_LCD_PRINTS
+  emberAfCorePrintln("@LOG {\"src\":\"LCD\",\"event\":\"set_flow\",\"flow\":%u,\"ready\":%d}", flow, s_ready);
+#endif
   if (s_ui.flow != flow || !s_ui.have_flow) {
     s_ui.flow = flow;
     s_ui.have_flow = true;
@@ -230,8 +246,10 @@ void lcd_ui_process(void)
   if (!s_ready) return;
   if (!s_ui.dirty) return;
   
-  emberAfCorePrintln("LCD: RENDER flow=%u batt=%u valve=%d", 
+#ifdef DEBUG_LCD_PRINTS
+  emberAfCorePrintln("@LOG {\"src\":\"LCD\",\"event\":\"render\",\"flow\":%u,\"batt\":%u,\"valve\":%d}", 
                      s_ui.flow, s_ui.batt, s_ui.valve_on);
+#endif
 
   char buf[16];
 

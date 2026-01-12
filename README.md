@@ -141,14 +141,14 @@ The system uses a text-based protocol over UART (115200 baud):
 
 ```
 ┌─────────────┐     Zigbee      ┌─────────────┐
-│ Sensor Node │────────────────▶│ Coordinator │
+│ Sensor Node │───────────────▶│  Coordinator│
 │ (Flow+Batt) │                 │    Node     │
 └─────────────┘                 └──────┬──────┘
                                        │ UART
-┌─────────────┐     Zigbee            │
+┌─────────────┐     Zigbee             │
 │ Valve Node  │◀───────────────────┬──┘
-│ (Actuator)  │                    │
-└─────────────┘                    │
+│ (Actuator)  │                     │
+└─────────────┘                     │
                             ┌──────▼──────┐
                             │ PC Gateway  │
                             │  (Serial)   │
@@ -190,29 +190,27 @@ The system uses a text-based protocol over UART (115200 baud):
 - Status reporting
 - Fail-safe mechanisms
 
+# 1. Start Mosquitto broker (if not running)
+```bash
+# 1. Start Mosquitto broker (if not running)
+net start mosquitto
+
+# Or:
+"C:\Program Files\mosquitto\mosquitto.exe" -v
+```
+
+# 2. Start gateway (owns COM13)
+
+```bash
+.\run_gateway.bat
+```
+# 3. Start dashboard (one or more instances)
+
+
+```bash
+.\run_dashboard_mqtt.bat
+```
 ## 🧪 Development & Testing
-
-### Test Without Hardware
-
-Use the fake device simulator for development:
-
-```bash
-# Option 1: Console output
-python Dashboard_Coordinator/fake_device.py --mode console --interval 2
-
-# Option 2: Generate sample data
-python Dashboard_Coordinator/fake_device.py --mode sample --count 500
-```
-
-### Database Inspection
-
-```bash
-sqlite3 Dashboard_Coordinator/telemetry.db
-
-sqlite> .schema
-sqlite> SELECT COUNT(*) FROM telemetry;
-sqlite> SELECT * FROM telemetry ORDER BY id DESC LIMIT 10;
-```
 
 ### Gateway Testing
 
@@ -259,30 +257,9 @@ print(f"Hourly data: {len(hourly)} hours")
 - **Manual Override**: Dashboard valve_set command bypasses automatic control
 - **State Updates**: Firmware sends @DATA immediately on valve state changes
 
-### Database Schema
-```sql
--- Telemetry table
-CREATE TABLE telemetry (
-    id INTEGER PRIMARY KEY,
-    ts REAL,              -- Timestamp from device
-    flow REAL,            -- Flow rate
-    battery REAL,         -- Battery percentage
-    valve TEXT,           -- "open" or "closed"
-    received_at REAL      -- PC receive timestamp
-);
+### Performance Specifications
 
--- Command log table
-CREATE TABLE command_log (
-    id INTEGER PRIMARY KEY,
-    cmd_id INTEGER,       -- Command ID
-    operation TEXT,       -- "valve_set" or "threshold_set"
-    params TEXT,          -- JSON parameters
-    ack_status INTEGER,   -- 0=pending, 1=success, -1=failed
-    ack_msg TEXT,         -- ACK message
-    sent_at REAL,         -- Command sent time
-    ack_at REAL          -- ACK received time
-);
-```
+- **Serial Baudrate**: 115200 bps
 
 ### Performance Specifications
 - **Serial Baudrate**: 115200 bps
@@ -354,6 +331,7 @@ python gateway_mqtt.py
 ```
 
 Features:
+
 - Publish telemetry to MQTT broker
 - Subscribe to command topics
 - Bridge between serial and MQTT
