@@ -1,6 +1,5 @@
-# Project Conventions - Golden Rules
-
-Keep this handy. New files should follow these rules.
+# Project Conventions
+This document outlines the coding and organizational conventions for the WFMS Gateway project. Adhering to these conventions ensures consistency, maintainability, and ease of collaboration among team members.                                      
 
 ---
 

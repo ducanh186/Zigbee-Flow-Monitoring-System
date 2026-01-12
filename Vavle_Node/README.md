@@ -11,6 +11,31 @@ controls a valve via the On/Off cluster.
 Notes: implement GPIO control in the On/Off attribute change callback
 (`emberAfPostAttributeChangeCallback`). Use Router mode if the node is
 line-powered.
+
+## Firmware Implementation (current code)
+
+The current C firmware for the valve node is split into two files:
+
+- `app.c`
+    - Starts network steering on boot if the node is not yet joined to a Zigbee
+        network (equivalent to running the Network Steering plugin from CLI).
+    - Enables the button-press framework so that hardware buttons can trigger
+        callbacks.
+    - Watches for changes to the On/Off server attribute on endpoint 1
+        (`emberAfPostAttributeChangeCallback`) and mirrors the attribute value to
+        LED0: `ON` → LED on (valve open), `OFF` → LED off (valve closed).
+    - Logs incoming On/Off commands with source address and command ID
+        (`emberAfPreCommandReceivedCallback`) for debugging, but still lets the
+        default ZCL handler run.
+    - Handles a local button (PB1): if the node is not joined, a press starts
+        network steering; if already joined, the press is ignored and only logged.
+    - Performs radio calibration when the stack requests it
+        (`emberAfRadioNeedsCalibratingCallback`).
+
+- `main.c`
+    - Runs the Silicon Labs system and kernel/polling loop boilerplate.
+    - Initializes hardware in `app_init()` by turning LED0 off so the valve
+        starts in the "closed" state at power-up.
 # Actuator Node - Node Điều Khiển Van
 
 ## 📋 Tổng quan
