@@ -189,18 +189,22 @@ class UartBase(ABC):
 class RealUart(UartBase):
     """
     Real UART implementation using pyserial.
-    Features auto-reconnect on disconnect.
+    Features auto-reconnect on disconnect and TX pacing for reliable communication.
     
-    TICK-SYNC WORKAROUND:
-    Coordinator sends [TICK] every 5 seconds. To avoid UART collision,
-    we track when last TICK was seen and send commands right after TICK
-    when we have ~4.9 seconds of safe window.
+    TX Pacing (Fix A): Send data in chunks with delays to prevent
+    Coordinator RX buffer overrun and CLI parse errors.
     """
     
-    def __init__(self, port: str, baud: int = 115200, reconnect_interval: float = 3.0):
+    def __init__(self, port: str, baud: int = 115200, reconnect_interval: float = 3.0,
+                 tx_chunk_size: int = 8, tx_chunk_delay_ms: int = 10, tx_char_delay_ms: int = 0):
         self.port = port
         self.baud = baud
         self.reconnect_interval = reconnect_interval
+        
+        # TX Pacing parameters (Fix A: Typewriter TX)
+        self.tx_chunk_size = max(0, tx_chunk_size)
+        self.tx_chunk_delay_ms = max(0, tx_chunk_delay_ms)
+        self.tx_char_delay_ms = max(0, tx_char_delay_ms)
         
         self._serial = None
         self._running = False
@@ -342,15 +346,16 @@ class RealUart(UartBase):
     
     def write_line(self, line: str) -> bool:
         """
-        Write a line to serial port.
+        Write a line to serial port with TX pacing.
         
-        Strategy to avoid UART collision:
-        1. Wait for quiet window (no RX activity for 200ms)
-        2. Clear input buffer completely
-        3. Write entire command atomically
-        4. Wait for transmission complete
+        Fix A: Typewriter TX - Send data in chunks with delays to prevent
+        Coordinator RX buffer overrun and CLI parse errors.
         
-        NOTE: TICK-sync disabled because [TICK] is now suppressed in Gateway mode.
+        Strategy:
+        1. Wait for quiet window (no new RX for 100ms)
+        2. Encode command
+        3. Send in chunks (or per-byte) with delays
+        4. Flush and wait for complete
         """
         if not self._connected:
             return False
@@ -359,43 +364,59 @@ class RealUart(UartBase):
             if not self._serial:
                 return False
             try:
-                # Wait for quiet window - 200ms of silence before sending
-                quiet_window = 0.20  # 200ms
-                quiet_deadline = time.time() + 1.5  # Max 1.5s wait
+                # Wait for brief quiet window - 100ms of no NEW data
+                quiet_window = 0.10
+                quiet_deadline = time.time() + 0.5  # Max 500ms wait
                 last_check_waiting = self._serial.in_waiting
                 last_rx_time = time.time()
                 
                 while time.time() < quiet_deadline:
                     current_waiting = self._serial.in_waiting
                     if current_waiting > last_check_waiting:
-                        # New data arrived, drain it and reset timer
-                        self._serial.read(current_waiting)
+                        # New data arrived, reset timer (but don't drain yet)
                         last_rx_time = time.time()
-                        last_check_waiting = 0
+                        last_check_waiting = current_waiting
                     elif (time.time() - last_rx_time) >= quiet_window:
-                        # Found quiet window
-                        logger.debug(f"[UART TX] Found quiet window after {time.time() - last_rx_time:.3f}s")
                         break
-                    time.sleep(0.01)
+                    time.sleep(0.005)
                 
-                # Clear input buffer completely before sending
-                self._serial.reset_input_buffer()
-                time.sleep(0.02)  # Small delay after buffer clear
-                
-                # Encode entire line (atomic)
+                # Encode entire line
                 data = line.encode('utf-8')
                 if not data.endswith(b'\n'):
                     data += b'\n'
                 
-                # Write entire command in one call
-                self._serial.write(data)
-                self._serial.flush()
+                logger.info(f"[UART TX] Sending {len(data)} bytes with pacing: chunk={self.tx_chunk_size}, delay={self.tx_chunk_delay_ms}ms")
                 
-                # Debug: Log what we wrote
-                logger.info(f"[UART TX] Wrote {len(data)} bytes: {data[:80]}")
+                # === TX PACING ===
+                # Mode 1: Per-character pacing (slowest, most reliable)
+                if self.tx_char_delay_ms > 0:
+                    delay_s = self.tx_char_delay_ms / 1000.0
+                    for b in data:
+                        self._serial.write(bytes([b]))
+                        self._serial.flush()
+                        time.sleep(delay_s)
+                    logger.debug(f"[UART TX] Sent {len(data)} bytes (per-char mode, {self.tx_char_delay_ms}ms/char)")
                 
-                # Wait for transmission to complete before returning
-                time.sleep(0.10)  # 100ms wait (longer for safety)
+                # Mode 2: Chunk pacing (recommended for Windows)
+                elif self.tx_chunk_size > 0 and self.tx_chunk_delay_ms > 0:
+                    chunk_size = self.tx_chunk_size
+                    delay_s = self.tx_chunk_delay_ms / 1000.0
+                    for i in range(0, len(data), chunk_size):
+                        chunk = data[i:i+chunk_size]
+                        self._serial.write(chunk)
+                        self._serial.flush()
+                        if i + chunk_size < len(data):  # Don't sleep after last chunk
+                            time.sleep(delay_s)
+                    logger.debug(f"[UART TX] Sent {len(data)} bytes in {(len(data) + chunk_size - 1) // chunk_size} chunks")
+                
+                # Mode 3: Fast path - write all at once (original behavior)
+                else:
+                    self._serial.write(data)
+                    self._serial.flush()
+                    logger.debug(f"[UART TX] Sent {len(data)} bytes (fast mode)")
+                
+                # Small delay after TX to let Coordinator process
+                time.sleep(0.05)
                 
                 return True
             except Exception as e:

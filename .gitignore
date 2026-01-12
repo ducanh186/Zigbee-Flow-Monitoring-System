@@ -43,6 +43,17 @@ telemetry.db
 *.sqlite
 *.sqlite3
 
+# Configuration (keep .env.example tracked, ignore actual .env)
+.env
+!.env.example
+
+# MQTT persistence (keep structure with .gitkeep, ignore database files)
+mosquitto_data/
+!mosquitto_data/.gitkeep
+
+# Gateway logs
+wfms/gateway.log
+
 # Firmware/build artifacts
 *.o
 *.a

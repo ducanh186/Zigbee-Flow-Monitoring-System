@@ -2,7 +2,7 @@
 # Run this AFTER starting gateway in another terminal
 
 Write-Host "`n=== TX Test Script ===" -ForegroundColor Cyan
-Write-Host "Make sure Gateway is running: python -m gateway.service --uart COM10 --debug" -ForegroundColor Yellow
+Write-Host "Make sure Gateway is running: python -m gateway.service --uart COM13 --debug" -ForegroundColor Yellow
 
 $baseUrl = "http://127.0.0.1:8080"
 $mosquitto = "C:\Program Files\mosquitto"
@@ -14,7 +14,7 @@ try {
     Write-Host "  ✓ Gateway is UP (uptime: $($health.uptime_s)s)" -ForegroundColor Green
 } catch {
     Write-Host "  ✗ Gateway is DOWN! Start it first." -ForegroundColor Red
-    Write-Host "  Run: Set-Location wfms; python -m gateway.service --uart COM10 --debug" -ForegroundColor Yellow
+    Write-Host "  Run: Set-Location wfms; python -m gateway.service --uart COM13 --debug" -ForegroundColor Yellow
     exit 1
 }
 

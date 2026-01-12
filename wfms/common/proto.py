@@ -192,9 +192,9 @@ def make_cmd_line(cmd_dict: Dict[str, Any], operation: Optional[str] = None) -> 
                 coord_cmd[field] = cmd_dict[field]
         
         json_str = json.dumps(coord_cmd, separators=(',', ':'))
-        # Use CLI "json" command format - works in both IDE and Gateway mode
-        # IMPORTANT: Use CRLF to match CLI behavior and avoid line dính
-        return f"json {json_str}{UART_EOL}"
+        # Use @CMD raw protocol format - required when Gateway mode ON (CLI input disabled)
+        # Format: @CMD {"id":N,"op":"...","value":"..."}
+        return f"@CMD {json_str}{UART_EOL}"
     
     # MQTT valve command format (legacy)
     cid = cmd_dict.get("cid", "unknown")
@@ -214,10 +214,9 @@ def make_cmd_line(cmd_dict: Dict[str, Any], operation: Optional[str] = None) -> 
     }
     
     json_str = json.dumps(coord_cmd, separators=(',', ':'))
-    # Use CLI "json" command format - CLI parses this and calls cmdHandleLine()
-    # This works in both IDE mode and Gateway mode without conflicts
-    # IMPORTANT: Use CRLF to match CLI behavior and avoid line dính
-    return f"json {json_str}{UART_EOL}"
+    # Use @CMD raw protocol format - required when Gateway mode ON (CLI input disabled)
+    # uartLinkPoll() parses @CMD prefix directly, no CLI needed
+    return f"@CMD {json_str}{UART_EOL}"
 
 
 # ============================================================================
@@ -531,6 +530,8 @@ def validate_cmd_payload(payload: Dict[str, Any]) -> Tuple[bool, str]:
     """
     Validate a command payload from MQTT.
     
+    B1: cid không còn bắt buộc - service.py sẽ auto-generate nếu không có.
+    
     Args:
         payload: Command dict to validate
     
@@ -540,9 +541,11 @@ def validate_cmd_payload(payload: Dict[str, Any]) -> Tuple[bool, str]:
     if not isinstance(payload, dict):
         return (False, "payload_not_dict")
     
+    # B1: cid is optional - auto-generated in service.py if missing
+    # Chỉ validate nếu có cid nhưng không phải string
     cid = payload.get("cid")
-    if not cid or not isinstance(cid, str):
-        return (False, "missing_cid")
+    if cid is not None and not isinstance(cid, str):
+        return (False, "cid_must_be_string")
     
     value = payload.get("value")
     if value not in ("ON", "OFF"):

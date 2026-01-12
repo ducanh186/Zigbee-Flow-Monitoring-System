@@ -52,7 +52,7 @@ cp .env.example .env      # Linux/macOS
 ```
 
 Chỉnh sửa `.env`:
-- `UART_PORT`: Cổng COM (Windows: COM10, Linux: /dev/ttyUSB0)
+- `UART_PORT`: Cổng COM (Windows: COM13, Linux: /dev/ttyUSB0)
 - `MQTT_HOST`, `MQTT_PORT`: Địa chỉ MQTT broker
 - `MQTT_USER`, `MQTT_PASS`: Credentials (nếu broker yêu cầu auth)
 
@@ -70,7 +70,7 @@ python -m gateway.service --fake-uart
 python -m gateway.service
 
 # Override port/baud nếu cần:
-python -m gateway.service --uart COM10 --baud 115200
+python -m gateway.service --uart COM13 --baud 115200
 ```
 
 **Debug mode:**

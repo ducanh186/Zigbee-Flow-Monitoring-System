@@ -7,7 +7,7 @@ import serial
 import time
 import json
 
-COM_PORT = "COM10"
+COM_PORT = "COM13"
 BAUD_RATE = 115200
 
 def test_cli():

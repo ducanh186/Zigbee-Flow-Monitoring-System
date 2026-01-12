@@ -5,7 +5,7 @@ Quick Valve Setup - Use existing binding
 import serial
 import time
 
-COM_PORT = "COM10"
+COM_PORT = "COM13"
 BAUD_RATE = 115200
 
 def send(ser, cmd):

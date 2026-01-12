@@ -23,7 +23,7 @@ UART/Serial communication utilities:
 ### Usage
 ```powershell
 cd tools\serial
-python configure_valve.py --port COM10
+python configure_valve.py --port COM13
 python quick_valve_setup.py
 python set_valve_target.py --node 0x1234
 ```

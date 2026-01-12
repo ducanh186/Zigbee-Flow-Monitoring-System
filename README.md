@@ -199,7 +199,7 @@ net start mosquitto
 "C:\Program Files\mosquitto\mosquitto.exe" -v
 ```
 
-# 2. Start gateway (owns COM10)
+# 2. Start gateway (owns COM13)
 
 ```bash
 .\run_gateway.bat

@@ -1,7 +1,9 @@
 # Quick Start Script - Mosquitto Broker for LAN
 # Chạy broker với config cho phép kết nối từ LAN
 
-$configFile = "mosquitto.conf"
+# Get project root (2 levels up from tools/mqtt)
+$projectRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$configFile = Join-Path $projectRoot "mosquitto.conf"
 
 # Kiểm tra config file
 if (-not (Test-Path $configFile)) {

@@ -33,7 +33,7 @@ from common.proto import (
     VALVE_COORD_TO_MQTT
 )
 from common.contract import (
-    TOPIC_STATE, TOPIC_TELEMETRY, TOPIC_CMD_VALVE, TOPIC_ACK, 
+    TOPIC_STATE, TOPIC_TELEMETRY, TOPIC_CMD_VALVE, TOPIC_CMD_MODE, TOPIC_ACK, 
     TOPIC_GATEWAY_STATUS, VALVE_ON, VALVE_OFF, update_site
 )
 from gateway.config import load_config, Config
@@ -409,9 +409,12 @@ class GatewayService:
             online_status = json.dumps({"up": True, "ts": now_ts()})
             client.publish(TOPIC_GATEWAY_STATUS, online_status, qos=1, retain=True)
             
-            # Subscribe to command topic
+            # Subscribe to command topics
             client.subscribe(TOPIC_CMD_VALVE, qos=1)
             logger.info(f"✓ Subscribed to {TOPIC_CMD_VALVE}")
+            
+            client.subscribe(TOPIC_CMD_MODE, qos=1)
+            logger.info(f"✓ Subscribed to {TOPIC_CMD_MODE}")
         else:
             logger.error(f"MQTT connect failed with code {rc}")
             self.runtime.set_mqtt_connected(False)
@@ -431,14 +434,28 @@ class GatewayService:
         raw_payload = msg.payload.decode('utf-8')
         logger.info(f"MQTT RAW <<< {repr(raw_payload)}")
         
+        # Route to appropriate handler based on topic
+        if msg.topic == TOPIC_CMD_VALVE:
+            self._handle_mqtt_valve_cmd(raw_payload)
+        elif msg.topic == TOPIC_CMD_MODE:
+            self._handle_mqtt_mode_cmd(raw_payload)
+        else:
+            logger.warning(f"Unknown topic: {msg.topic}")
+    
+    def _handle_mqtt_valve_cmd(self, raw_payload: str):
+        """Handle valve command from MQTT."""
         try:
             payload = json.loads(raw_payload)
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            logger.warning(f"Invalid JSON in command: {e}")
-            logger.warning(f"  Raw bytes: {msg.payload[:100]}")
+            logger.warning(f"Invalid JSON in valve command: {e}")
             return
         
-        logger.info(f"Received command: {payload}")
+        # B1: Auto-generate cid if not provided (avoid duplicate_cid when testing)
+        if "cid" not in payload or not payload["cid"]:
+            payload["cid"] = f"valve_{now_ts()}_{id(payload) % 10000}"
+            logger.debug(f"Auto-generated cid: {payload['cid']}")
+        
+        logger.info(f"Received valve command: {payload}")
         
         # Increment command counter
         self.runtime.inc_cmd()
@@ -481,23 +498,90 @@ class GatewayService:
         
         self._publish_ack(cid, ok, ack_reason)
     
+    def _handle_mqtt_mode_cmd(self, raw_payload: str):
+        """Handle mode command from MQTT (auto/manual toggle)."""
+        try:
+            payload = json.loads(raw_payload)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            logger.warning(f"Invalid JSON in mode command: {e}")
+            return
+        
+        logger.info(f"Received mode command: {payload}")
+        
+        # Increment command counter
+        self.runtime.inc_cmd()
+        
+        # B1: Auto-generate cid if not provided
+        if "cid" not in payload or not payload["cid"]:
+            payload["cid"] = f"mode_{now_ts()}_{id(payload) % 10000}"
+            logger.debug(f"Auto-generated cid: {payload['cid']}")
+        
+        cid = payload["cid"]
+        value = payload.get("value", "").lower()
+        user = payload.get("by", "anonymous")
+        
+        # Validate mode value
+        if value not in ("auto", "manual"):
+            self._publish_ack(cid, False, "value must be auto or manual")
+            return
+        
+        # Apply rules (reuse same rules as valve commands)
+        allowed, rule_reason = self.rules.check_and_mark(cid, user)
+        if not allowed:
+            logger.warning(f"Mode command rejected by rules: cid={cid}, reason={rule_reason}")
+            self._publish_ack(cid, False, rule_reason)
+            return
+        
+        # Build command for Coordinator: {"id":N,"op":"mode_set","value":"auto"}
+        # Include cid for ACK matching
+        cmd_dict = {"cid": cid, "op": "mode_set", "value": value}
+        cmd_line = make_cmd_line(cmd_dict)
+        
+        # Send with retry
+        ack = self._send_cmd_with_retry(cid, cmd_line, max_retries=2)
+        
+        if ack is None:
+            logger.warning(f"ACK timeout for mode cid={cid} after retries")
+            self._publish_ack(cid, False, "timeout")
+            return
+        
+        # Process ACK
+        ok = ack.get("ok", False)
+        ack_reason = ack.get("reason", "")
+        
+        if ok:
+            # Update state cache with new mode
+            self.state.mode = value
+            self.state.updated_at = now_ts()
+            self._publish_state()
+        
+        self._publish_ack(cid, ok, ack_reason)
+    
     def _send_cmd_with_retry(self, cid: str, cmd_line: str, max_retries: int = 3) -> Optional[dict]:
         """
-        Send command to UART with retry on timeout.
+        Send command to UART with retry and exponential backoff.
         
-        Coordinator may miss bytes when its TX buffer is busy with debug output.
-        We use longer delays and more retries to improve reliability.
+        Fix B: Retry with backoff + jitter to avoid spamming Coordinator.
+        Backoff pattern: base * 2^attempt (capped at max_delay)
+        Plus random jitter to avoid sync issues.
         
-        WARNING: Real fix requires disabling debug prints in Coordinator firmware.
+        Example with defaults: 0.3s -> 0.6s -> 1.2s (+ 0-0.2s jitter)
         """
+        import random
+        
+        base_delay = self.config.cmd_retry_base_delay_s
+        max_delay = self.config.cmd_retry_max_delay_s
+        jitter = self.config.cmd_retry_jitter_s
+        
         for attempt in range(max_retries + 1):
+            # Backoff delay BEFORE retry (not before first attempt)
             if attempt > 0:
-                logger.info(f"Retry #{attempt} for cid={cid}")
-                # Longer wait before retry - let Coordinator finish output burst
-                time.sleep(0.3)
-            
-            # NOTE: write_line() now implements quiet window detection internally
-            # No need to sleep here - it waits for RX silence before sending
+                # Exponential backoff: base * 2^(attempt-1), capped at max
+                delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
+                # Add random jitter
+                delay += random.uniform(0, jitter)
+                logger.info(f"Retry #{attempt} for cid={cid} (backoff {delay:.2f}s)")
+                time.sleep(delay)
             
             logger.info(f"TX >>> {cmd_line.strip()}")
             
@@ -511,10 +595,12 @@ class GatewayService:
             ack = self.ack_router.wait_for_ack(cid, timeout=self.config.ack_timeout_s)
             
             if ack is not None:
+                logger.info(f"ACK received for cid={cid} on attempt {attempt + 1}")
                 return ack
             
             logger.warning(f"ACK timeout for cid={cid} (attempt {attempt + 1}/{max_retries + 1})")
         
+        logger.error(f"All {max_retries + 1} attempts failed for cid={cid}")
         return None
     
     def _uart_reader_loop(self) -> None:
@@ -526,8 +612,8 @@ class GatewayService:
             if line is None:
                 continue
             
-            # DEBUG: Log raw line received (helpful for diagnosing dính rác/ACK issues)
-            logger.info(f"[UART RX RAW] {line!r}")
+            # B3: Log RAW xuống DEBUG để tránh spam, chỉ bật khi cần debug sâu
+            logger.debug(f"[UART RX RAW] {line!r}")
             
             # Extract multiple frames from single line (handles @ACK/@INFO mid-line)
             frames = extract_frames(line)
@@ -535,6 +621,10 @@ class GatewayService:
                 # No valid protocol frames found
                 logger.debug(f"[UART] No protocol frames in: {line[:60]}")
                 continue
+            
+            # B3: Log valid frames ở INFO level
+            for frame in frames:
+                logger.info(f"[UART RX] {frame[:80]}")
             
             # Process each extracted frame
             for frame in frames:
@@ -641,18 +731,32 @@ class GatewayService:
         """
         Handle @ACK from UART (Coordinator format).
         
+        B2: Chỉ resolve ACK nếu có id > 0 (id hợp lệ).
+        - id=0: Coordinator không parse được command → bỏ qua, để timeout+retry
+        - id > 0: Map id -> cid và resolve
+        
         Coordinator ACK: {"id":123,"ok":true,"msg":"valve set","valve":"open"}
         Translated to:   {"cid":"xxx","ok":true,"reason":"valve set","valve":"open"}
-        
-        Note: id=0 means Coordinator failed to parse the command (corrupt RX).
         """
-        logger.debug(f"RX @ACK: {ack}")
-        
-        # Check for parse error ACK (id=0 means Coordinator couldn't parse command)
-        if ack.get("id") == 0:
-            logger.warning(f"⚠ Coordinator ACK with id=0 - command was corrupted: {ack.get('msg', '?')}")
-            # Don't try to resolve - let it timeout and retry
+        # B2: Bỏ qua ACK không có id (event khác như @LOG tx_done)
+        if "id" not in ack:
+            logger.debug(f"Ignoring ACK-like message without id: {ack}")
             return
+        
+        ack_id = ack.get("id")
+        
+        # B2: id=0 means Coordinator couldn't parse command
+        if ack_id == 0:
+            logger.warning(f"⚠ Coordinator ACK id=0 - command corrupted: {ack.get('msg', '?')}")
+            # Don't resolve - let it timeout and retry
+            return
+        
+        # B2: id phải là số > 0
+        if not isinstance(ack_id, int) or ack_id < 1:
+            logger.warning(f"⚠ Invalid ACK id={ack_id}: {ack}")
+            return
+        
+        logger.info(f"RX @ACK id={ack_id}, ok={ack.get('ok')}, msg={ack.get('msg', '')}")
         
         # Check if this is Coordinator format (has "id" field) or MQTT format (has "cid" field)
         if "id" in ack and "cid" not in ack:
@@ -710,7 +814,7 @@ Examples:
   python -m gateway.service                         # Real UART from .env
   python -m gateway.service --fake-uart            # Fake UART mode
   python -m gateway.service --fake-uart --drop-ack-prob 0.3  # With 30% ACK drop
-  python -m gateway.service --uart COM10 --baud 115200       # Override port/baud
+  python -m gateway.service --uart COM13 --baud 115200       # Override port/baud
         """
     )
     
@@ -730,7 +834,7 @@ Examples:
     parser.add_argument(
         "--uart",
         type=str,
-        help="Override UART port (e.g., COM10 or /dev/ttyUSB0)"
+        help="Override UART port (e.g., COM13 or /dev/ttyUSB0)"
     )
     
     parser.add_argument(
@@ -793,7 +897,10 @@ def main():
         logger.info("Real UART mode")
         uart = RealUart(
             port=config.uart_port,
-            baud=config.uart_baud
+            baud=config.uart_baud,
+            tx_chunk_size=config.uart_tx_chunk_size,
+            tx_chunk_delay_ms=config.uart_tx_chunk_delay_ms,
+            tx_char_delay_ms=config.uart_tx_char_delay_ms
         )
     
     # Create and start service
