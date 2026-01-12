@@ -20,8 +20,8 @@ class Config(BaseSettings):
     uart_port: str = Field(default="COM7", description="Serial port for Zigbee Coordinator")
     uart_baud: int = Field(default=115200, description="Serial baud rate")
     
-    # MQTT Configuration
-    mqtt_host: str = Field(default="127.0.0.1", description="MQTT broker host")
+    # MQTT Configuration (read from .env, no default - must be configured)
+    mqtt_host: str = Field(description="MQTT broker host")
     mqtt_port: int = Field(default=1883, description="MQTT broker port")
     mqtt_user: Optional[str] = Field(default="", description="MQTT username (optional)")
     mqtt_pass: Optional[str] = Field(default="", description="MQTT password (optional)")
