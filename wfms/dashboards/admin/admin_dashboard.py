@@ -88,24 +88,39 @@ def init_session_state():
         st.session_state.config = DEFAULT_CONFIG.copy()
     if "config_applied_at" not in st.session_state:
         st.session_state.config_applied_at = None
-    if "health_data" not in st.session_state:
-        st.session_state.health_data = None
-    if "health_error" not in st.session_state:
-        st.session_state.health_error = None
-    if "rules_data" not in st.session_state:
-        st.session_state.rules_data = None
     if "logs_data" not in st.session_state:
         st.session_state.logs_data = None
     if "logs_error" not in st.session_state:
         st.session_state.logs_error = None
     if "current_mode" not in st.session_state:
-        st.session_state.current_mode = "AUTO"  # Default mode
+        st.session_state.current_mode = "AUTO"
+    if "logs" not in st.session_state:
+        st.session_state.logs = [
+            {"time": datetime.now().strftime('%H:%M:%S'), "message": "Admin Dashboard initialized", "type": "success"},
+            {"time": datetime.now().strftime('%H:%M:%S'), "message": "Connecting to MQTT Broker...", "type": "info"},
+        ]
+    if "time_window" not in st.session_state:
+        st.session_state.time_window = "Live"
 
 
 def get_config() -> Dict:
     if "config" not in st.session_state:
         st.session_state.config = DEFAULT_CONFIG.copy()
     return st.session_state.config
+
+
+def add_log(message: str, log_type: str = "info"):
+    """Add a log entry to session state"""
+    if "logs" not in st.session_state:
+        st.session_state.logs = []
+    
+    log_entry = {
+        "time": datetime.now().strftime('%H:%M:%S'),
+        "message": message,
+        "type": log_type
+    }
+    st.session_state.logs.insert(0, log_entry)
+    st.session_state.logs = st.session_state.logs[:100]
 
 
 # =============================================================================
@@ -243,7 +258,6 @@ class MQTTManager:
                 
                 if msg.topic == f"wfms/{site}/state":
                     self.latest_state = data
-                    # Track mode from state
                     if 'mode' in data:
                         import streamlit as st
                         if 'current_mode' in st.session_state:
@@ -305,7 +319,6 @@ class MQTTManager:
         try:
             result = self.client.publish(topic, json.dumps(payload), qos=1)
             if result.rc == mqtt.MQTT_ERR_SUCCESS:
-                # Track command in buffer
                 with self._lock:
                     cmd_record = payload.copy()
                     cmd_record['sent_at'] = time.time()
@@ -405,59 +418,317 @@ def format_ago(ts):
         return "--"
 
 
-def get_available_com_ports():
-    try:
-        import serial.tools.list_ports
-        ports = [p.device for p in serial.tools.list_ports.comports()]
-        if ports:
-            return sorted(ports)
-    except:
-        pass
-    return [f"COM{i}" for i in range(1, 31)]
-
-
 # =============================================================================
-# CUSTOM CSS
+# CUSTOM CSS - Modern Dark Theme (matching user dashboard)
 # =============================================================================
 
 def inject_custom_css():
     st.markdown("""
     <style>
-        .stApp { background-color: #0E1117; }
-        h1 { font-family: 'Segoe UI', sans-serif; font-weight: 700; color: #E0E0E0; text-shadow: 0 0 10px rgba(255,255,255,0.1); }
-        [data-testid="stMetric"] { 
-            background-color: #262626; 
-            padding: 15px 20px; 
-            border-radius: 10px; 
-            border: 1px solid #383838; 
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3); 
-            transition: transform 0.2s; 
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        /* Hide Streamlit defaults */
+        #MainMenu, footer, header {visibility: hidden;}
+        .block-container { padding: 1rem 1rem 0 1rem !important; max-width: 100% !important; }
+        
+        /* Base styling */
+        .stApp { 
+            background-color: #0E1117; 
+            font-family: 'Inter', sans-serif;
         }
-        [data-testid="stMetric"]:hover { border-color: #666; transform: translateY(-2px); }
-        [data-testid="stMetricLabel"] { font-size: 16px !important; color: #A0A0A0 !important; font-weight: 500; }
-        [data-testid="stMetricValue"] { font-size: 36px !important; font-weight: 700 !important; color: #FFFFFF !important; font-family: 'Roboto Mono', monospace; }
-        [data-testid="stMetricDelta"] svg { transform: scale(1.2); }
-        .stTabs [data-baseweb="tab-list"] { gap: 10px; background-color: transparent; }
-        .stTabs [data-baseweb="tab"] { height: 55px; background-color: #1E1E1E; border-radius: 8px; color: #B0B0B0; font-weight: 600; border: 1px solid #333; padding: 0 25px; }
-        .stTabs [aria-selected="true"] { background-color: #FF4B4B !important; color: white !important; border-color: #FF4B4B !important; box-shadow: 0 0 10px rgba(255, 75, 75, 0.4); }
-        .stButton button { font-weight: bold; border-radius: 6px; height: 45px; }
-        .kpi-header {
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            border: 1px solid #30305a;
-            border-radius: 10px;
-            padding: 15px 20px;
-            margin-bottom: 20px;
+        
+        /* Header bar styling */
+        .header-bar {
+            background: #262730;
+            border-radius: 12px;
+            padding: 12px 24px;
+            border: 1px solid rgba(255,255,255,0.08);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
-        .kpi-header span { color: #ffffff; margin-right: 30px; }
-        .kpi-header .kpi-value { color: #4CAF50; font-weight: 600; }
-        .block-container { padding-top: 1rem; }
-        .valve-status-box {
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .header-icon {
+            background: rgba(255, 75, 75, 0.2);
+            padding: 8px;
+            border-radius: 8px;
+        }
+        .header-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #FAFAFA;
+            margin: 0;
+        }
+        .header-subtitle {
+            font-size: 11px;
+            color: #9CA3AF;
+            font-family: 'JetBrains Mono', monospace;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .header-stats {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+        }
+        .status-online {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #00E676;
+        }
+        .status-offline {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #FF5252;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #00E676;
+            animation: pulse 2s infinite;
+        }
+        .status-dot-off {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #FF5252;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .broker-info { color: #9CA3AF; }
+        .broker-info span { color: #FAFAFA; }
+        .packet-badge {
+            background: rgba(0,0,0,0.3);
+            padding: 4px 12px;
+            border-radius: 6px;
+            border: 1px solid #374151;
+        }
+        
+        /* Panel styling */
+        .glass-panel {
+            background: rgba(38, 39, 48, 0.9);
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.08);
+            padding: 16px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        
+        /* Valve status card */
+        .valve-card {
+            background: #262730;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.08);
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+        .valve-glow-open {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: #00E676;
+            box-shadow: 0 0 20px rgba(0,230,118,0.5);
+        }
+        .valve-glow-closed {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: #FF5252;
+            box-shadow: 0 0 20px rgba(255,82,82,0.5);
+        }
+        .valve-icon-open {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: rgba(0,230,118,0.1);
+            border: 2px solid rgba(0,230,118,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto;
+            box-shadow: 0 0 30px rgba(0,230,118,0.2);
+        }
+        .valve-icon-closed {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: rgba(255,82,82,0.1);
+            border: 2px solid rgba(255,82,82,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto;
+            box-shadow: 0 0 30px rgba(255,82,82,0.2);
+        }
+        .valve-text-open {
+            font-size: 28px;
+            font-weight: 700;
+            color: #00E676;
             text-align: center;
-            margin-bottom: 20px;
+            margin-top: 8px;
+            letter-spacing: 2px;
         }
-        .valve-icon { font-size: 60px; }
-        .valve-label { font-size: 28px; font-weight: bold; text-transform: uppercase; }
-        .valve-caption { color: #888; font-size: 14px; }
+        .valve-text-closed {
+            font-size: 28px;
+            font-weight: 700;
+            color: #FF5252;
+            text-align: center;
+            margin-top: 8px;
+            letter-spacing: 2px;
+        }
+        
+        /* Metric boxes */
+        .metric-box {
+            background: rgba(0,0,0,0.2);
+            border: 1px solid #374151;
+            border-radius: 8px;
+            padding: 12px;
+            text-align: center;
+        }
+        .metric-label {
+            font-size: 11px;
+            color: #9CA3AF;
+            margin-bottom: 4px;
+        }
+        .metric-value {
+            font-size: 24px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            color: #29b5e8;
+        }
+        .metric-unit {
+            font-size: 12px;
+            color: #6B7280;
+            font-weight: 400;
+        }
+        
+        /* Lock overlay */
+        .lock-overlay {
+            background: rgba(38,39,48,0.9);
+            backdrop-filter: blur(4px);
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+            border: 1px solid #374151;
+        }
+        
+        /* Log panel */
+        .log-panel {
+            background: #262730;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.08);
+            padding: 12px;
+            height: 140px;
+            overflow-y: auto;
+        }
+        .log-entry {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
+        .log-entry:hover {
+            background: rgba(255,255,255,0.05);
+        }
+        .log-time { color: #4B5563; }
+        .log-info { color: #9CA3AF; }
+        .log-success { color: #00E676; }
+        .log-error { color: #FF5252; }
+        .log-warn { color: #FFC107; }
+        
+        /* Gateway health */
+        .gateway-panel {
+            background: #262730;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.08);
+            padding: 16px;
+        }
+        
+        /* Command history */
+        .cmd-entry {
+            background: rgba(0,0,0,0.2);
+            border: 1px solid rgba(55,65,81,0.5);
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .cmd-action {
+            font-size: 12px;
+            font-weight: 700;
+            color: #FAFAFA;
+        }
+        .cmd-source {
+            font-size: 10px;
+            color: #6B7280;
+        }
+        .cmd-time {
+            font-size: 10px;
+            font-family: 'JetBrains Mono', monospace;
+            color: #9CA3AF;
+        }
+        
+        /* Section headers */
+        .section-header {
+            font-size: 11px;
+            font-weight: 700;
+            color: #9CA3AF;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        
+        /* Chart container */
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .chart-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #9CA3AF;
+        }
+        
+        /* Buttons */
+        .stButton > button {
+            width: 100%;
+            border-radius: 8px !important;
+            font-weight: 700 !important;
+            height: 50px !important;
+            font-size: 15px !important;
+        }
+        
+        /* Admin badge */
+        .admin-badge {
+            background: linear-gradient(135deg, #FF4B4B 0%, #FF6B6B 100%);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 700;
+            margin-left: 8px;
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -477,24 +748,25 @@ def render_sidebar():
         st.divider()
         
         if OPTION_MENU_AVAILABLE:
-            pages = ["Live View", "Panel Health", "Rule Control", "Configuration", "System Logs"]
+            pages = ["Live View", "Network Setting", "System Logs"]
+            icons = ["activity", "wifi", "file-text"]
             selected = option_menu(
                 menu_title=None,
                 options=pages,
-                icons=["activity", "heart-pulse", "sliders", "gear", "file-text"],
-                default_index=pages.index(st.session_state.current_page),
+                icons=icons,
+                default_index=pages.index(st.session_state.current_page) if st.session_state.current_page in pages else 0,
                 styles={
                     "container": {"padding": "0", "background-color": "#0e1117"},
-                    "icon": {"color": "#4CAF50", "font-size": "18px"},
+                    "icon": {"color": "#FF4B4B", "font-size": "18px"},
                     "nav-link": {"font-size": "14px", "text-align": "left", "margin": "2px", "padding": "10px 15px"},
-                    "nav-link-selected": {"background-color": "#1a1a2e", "border-left": "4px solid #4CAF50"},
+                    "nav-link-selected": {"background-color": "#1a1a2e", "border-left": "4px solid #FF4B4B"},
                 }
             )
             st.session_state.current_page = selected
         else:
             st.subheader("📍 Navigation")
-            for label, page in [("📊 Live View", "Live View"), ("🏥 Panel Health", "Panel Health"),
-                                ("⚙️ Rule Control", "Rule Control"), ("🔧 Configuration", "Configuration"),
+            for label, page in [("📊 Live View", "Live View"), 
+                                ("🌐 Network Setting", "Network Setting"),
                                 ("📋 System Logs", "System Logs")]:
                 if st.session_state.current_page == page:
                     st.markdown(f"**→ {label}**")
@@ -503,8 +775,7 @@ def render_sidebar():
                     st.rerun()
         
         st.divider()
-        st.subheader("🔌 Connections")
-        st.text(f"API: {config['api_base_url']}")
+        st.subheader("🔌 Connection Status")
         st.text(f"MQTT: {stats['mqtt_host']}:{stats['mqtt_port']}")
         
         if stats['connected']:
@@ -529,553 +800,370 @@ def render_sidebar():
 
 
 # =============================================================================
-# LIVE VIEW
+# LIVE VIEW (Redesigned to match User Dashboard)
 # =============================================================================
 
 def render_live_view():
     mqtt_mgr = get_mqtt_manager()
     stats = mqtt_mgr.get_stats()
     state = mqtt_mgr.get_state()
+    config = get_config()
     
-    # --- HEADER ---
-    st.title("📡 Zigbee Gateway Operator")
-    st.markdown("---")
+    # Get current values
+    is_connected = stats['connected']
+    packet_count = len(mqtt_mgr.get_telemetry(500))
     
-    # --- QUICK STATS ROW (5 metrics) ---
-    stat_col1, stat_col2, stat_col3, stat_col4, stat_col5 = st.columns(5)
-    with stat_col1:
-        is_connected = stats['connected']
-        status_text = "ONLINE" if is_connected else "OFFLINE"
-        st.metric(
-            "System Status", 
-            status_text, 
-            delta="Connected" if is_connected else "- Disconnected",
-            delta_color="normal" if is_connected else "inverse"
-        )
-    with stat_col2:
-        st.metric("RX Lines", f"{stats.get('telemetry_count', 0):,}")
-    with stat_col3:
-        st.metric("TX Cmds", f"{stats.get('cmd_count', 0):,}")
-    with stat_col4:
-        # Count telemetry as data packets
-        tele_count = len(mqtt_mgr.get_telemetry(100))
-        st.metric("Data Pkts", f"{tele_count:,}")
-    with stat_col5:
-        err = stats.get("last_error", "")
-        if err:
-            st.error(f"Error: {err}")
-        else:
-            st.metric("Errors", "None", delta_color="off")
-    
-    # --- VALVE CONTROL SECTION ---
-    st.subheader("🎮 Valve Control")
-    
-    # Mode selector row
-    mode_col1, mode_col2, mode_col3 = st.columns([1, 1, 2])
-    
-    with mode_col1:
-        current_mode = st.session_state.get('current_mode', 'AUTO')
-        # Extract mode from state if available
-        if state and isinstance(state, dict) and 'mode' in state:
-            current_mode = state.get('mode', 'AUTO').upper()
-            st.session_state.current_mode = current_mode
-        
-        st.markdown(f"**Current Mode:** {'🤖 AUTO' if current_mode == 'AUTO' else '✋ MANUAL'}")
-    
-    with mode_col2:
-        if st.button("🤖 AUTO Mode" if current_mode == "MANUAL" else "✋ MANUAL Mode", 
-                     key="mode_toggle", use_container_width=True):
-            config = get_config()
-            site = config['site']
-            new_mode = "AUTO" if current_mode == "MANUAL" else "MANUAL"
-            mode_payload = {
-                "cid": f"web_{int(time.time()*1000)}",
-                "value": new_mode
-            }
-            topic = f"wfms/{site}/cmd/mode"
-            success, error = mqtt_mgr.publish(topic, mode_payload)
-            if success:
-                st.session_state.current_mode = new_mode
-                st.success(f"✅ Switched to {new_mode}")
-                time.sleep(0.5)
-                st.rerun()
-            else:
-                st.error(f"❌ Failed: {error}")
-    
-    with mode_col3:
-        if current_mode == "AUTO":
-            st.info("🤖 Sensor controls valve automatically")
-        else:
-            st.warning("✋ Manual control active")
-    
-    st.divider()
-    
-    # Valve control buttons
-    ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1, 1, 2])
-    
-    with ctrl_col1:
-        if st.button("🟢 OPEN VALVE", key="valve_open", type="primary", use_container_width=True):
-            config = get_config()
-            site = config['site']
-            current_mode = st.session_state.get('current_mode', 'AUTO')
-            
-            # If in AUTO mode, switch to MANUAL first
-            if current_mode == "AUTO":
-                mode_payload = {
-                    "cid": f"web_{int(time.time()*1000)}",
-                    "value": "MANUAL"
-                }
-                mode_topic = f"wfms/{site}/cmd/mode"
-                mode_success, mode_error = mqtt_mgr.publish(mode_topic, mode_payload)
-                if mode_success:
-                    st.session_state.current_mode = "MANUAL"
-                    st.info("🔄 Auto-switched to MANUAL")
-                    time.sleep(0.3)
-                else:
-                    st.error(f"❌ Mode switch failed: {mode_error}")
-                    return
-            
-            # Send valve command
-            cmd_payload = {
-                "cid": f"web_{int(time.time()*1000)}",
-                "value": "ON"
-            }
-            topic = f"wfms/{site}/cmd/valve"
-            success, error = mqtt_mgr.publish(topic, cmd_payload)
-            if success:
-                st.success("✅ Command sent: OPEN")
-                time.sleep(0.5)
-                st.rerun()
-            else:
-                st.error(f"❌ Failed: {error}")
-    
-    with ctrl_col2:
-        if st.button("🔴 CLOSE VALVE", key="valve_close", use_container_width=True):
-            config = get_config()
-            site = config['site']
-            current_mode = st.session_state.get('current_mode', 'AUTO')
-            
-            # If in AUTO mode, switch to MANUAL first
-            if current_mode == "AUTO":
-                mode_payload = {
-                    "cid": f"web_{int(time.time()*1000)}",
-                    "value": "MANUAL"
-                }
-                mode_topic = f"wfms/{site}/cmd/mode"
-                mode_success, mode_error = mqtt_mgr.publish(mode_topic, mode_payload)
-                if mode_success:
-                    st.session_state.current_mode = "MANUAL"
-                    st.info("🔄 Auto-switched to MANUAL")
-                    time.sleep(0.3)
-                else:
-                    st.error(f"❌ Mode switch failed: {mode_error}")
-                    return
-            
-            # Send valve command
-            cmd_payload = {
-                "cid": f"web_{int(time.time()*1000)}",
-                "value": "OFF"
-            }
-            topic = f"wfms/{site}/cmd/valve"
-            success, error = mqtt_mgr.publish(topic, cmd_payload)
-            if success:
-                st.success("✅ Command sent: CLOSE")
-                time.sleep(0.5)
-                st.rerun()
-            else:
-                st.error(f"❌ Failed: {error}")
-    
-    with ctrl_col3:
-        # Show recent commands
-        recent_cmds = mqtt_mgr.get_commands(5)
-        if recent_cmds:
-            st.markdown("**Recent Commands:**")
-            for cmd in recent_cmds:
-                cid = cmd.get('cid', 'unknown')
-                value = cmd.get('value', '')
-                sent_time = format_time_short(cmd.get('sent_at'))
-                topic_type = cmd.get('topic', '').split('/')[-1]
-                icon = "🎚️" if topic_type == "mode" else "🎮"
-                st.caption(f"{icon} {sent_time}: {value}")
-        else:
-            st.caption("No commands sent yet")
-    
-    st.divider()
-    
-    # --- MONITORING SECTION (Current State + Charts) ---
-    st.subheader("📊 Live Telemetry")
-    
-    # Get valve state for display
-    valve_state = None
-    latest_flow = None
-    latest_battery = None
+    # Parse valve state
+    valve_state = "unknown"
+    latest_flow = 0.0
+    latest_battery = 0
     
     if state and isinstance(state, dict):
         valve_raw = state.get('valve', 'unknown')
         if isinstance(valve_raw, str):
             valve_state = valve_raw.lower()
-            if valve_state == 'close':
+            if valve_state in ['close', 'off']:
                 valve_state = 'closed'
-            elif valve_state == 'on':
+            elif valve_state in ['open', 'on']:
                 valve_state = 'open'
-            elif valve_state == 'off':
-                valve_state = 'closed'
-        latest_flow = state.get('flow')
-        latest_battery = state.get('battery')
+        latest_flow = state.get('flow', 0) or 0
+        latest_battery = state.get('battery', 0) or 0
     
-    # Two columns: Left = Current State, Right = Charts
-    mon_c1, mon_c2 = st.columns([1.2, 2.5])
+    is_open = valve_state == 'open'
     
-    with mon_c1:
-        st.markdown("##### Current State")
-        with st.container(border=True):
-            if state and isinstance(state, dict):
-                # Valve status with big icon
-                v_color = "#00E676" if valve_state == "open" else "#FF5252"
-                v_icon = "💧" if valve_state == "open" else "🚫"
-                st.markdown(
-                    f"""
-                    <div style='text-align: center; margin-bottom: 20px;'>
-                        <div style='font-size: 60px;'>{v_icon}</div>
-                        <div style='font-size: 28px; font-weight: bold; color: {v_color}; text-transform: uppercase;'>
-                            {str(valve_state or 'unknown')}
-                        </div>
-                        <div style='color: #888; font-size: 14px;'>VALVE STATUS</div>
-                    </div>
-                    """, 
-                    unsafe_allow_html=True
-                )
-                st.divider()
-                c_flow, c_bat = st.columns(2)
-                flow_val = f"{latest_flow:.1f}" if isinstance(latest_flow, (int, float)) else "--"
-                bat_val = f"{latest_battery}" if latest_battery is not None else "--"
-                c_flow.metric("Flow Rate", flow_val, "L/min")
-                c_bat.metric("Battery", f"{bat_val}%", "Level")
-            else:
-                st.warning("Waiting for @DATA...")
-                st.metric("Flow", "--")
-                st.metric("Battery", "--")
+    # =========================================================================
+    # HEADER BAR
+    # =========================================================================
+    status_class = "status-online" if is_connected else "status-offline"
+    dot_class = "status-dot" if is_connected else "status-dot-off"
+    status_text = "ONLINE" if is_connected else "OFFLINE"
     
-    with mon_c2:
-        # Get flow data for charts
-        flow_data = mqtt_mgr.get_flow_history(200)
-        
-        if flow_data and len(flow_data) > 0:
+    st.markdown(f"""
+    <div class="header-bar">
+        <div class="header-left">
+            <div class="header-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FF4B4B" stroke-width="2">
+                    <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
+                </svg>
+            </div>
+            <div>
+                <h1 class="header-title">WFMS Admin Dashboard <span class="admin-badge">ADMIN</span></h1>
+                <p class="header-subtitle">Site: {config['site'].upper()}</p>
+            </div>
+        </div>
+        <div class="header-stats">
+            <div class="{status_class}">
+                <div class="{dot_class}"></div>
+                <span>{status_text}</span>
+            </div>
+            <div class="broker-info">
+                Broker: <span>{stats['mqtt_host']}</span>
+            </div>
+            <div class="packet-badge">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2" style="display:inline;vertical-align:middle;margin-right:4px;">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                </svg>
+                {packet_count:,} Pkts
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # =========================================================================
+    # MAIN GRID: LEFT (2/3) + RIGHT (1/3)
+    # =========================================================================
+    col_left, col_right = st.columns([2, 1], gap="medium")
+    
+    # -------------------------------------------------------------------------
+    # LEFT COLUMN: Chart + Logs
+    # -------------------------------------------------------------------------
+    with col_left:
+        # FLOW CHART
+        with st.container():
+            st.markdown("""
+            <div class="chart-header">
+                <span class="chart-title">📈 Flow History</span>
+            </div>
+            """, unsafe_allow_html=True)
+            
             # Time window selector
-            window = st.selectbox("Time Window", ["All", "5 min", "15 min", "60 min"], key="flow_window")
+            tw_cols = st.columns([1, 1, 1, 6])
+            with tw_cols[0]:
+                if st.button("Live", key="tw_live", type="primary" if st.session_state.time_window == "Live" else "secondary"):
+                    st.session_state.time_window = "Live"
+            with tw_cols[1]:
+                if st.button("15m", key="tw_15m", type="primary" if st.session_state.time_window == "15m" else "secondary"):
+                    st.session_state.time_window = "15m"
+            with tw_cols[2]:
+                if st.button("1h", key="tw_1h", type="primary" if st.session_state.time_window == "1h" else "secondary"):
+                    st.session_state.time_window = "1h"
             
-            now = time.time()
-            cutoff = now - {"All": 999999, "5 min": 300, "15 min": 900, "60 min": 3600}.get(window, 999999)
-            filtered = [d for d in flow_data if d.get('received_at', d.get('ts', 0)) >= cutoff]
+            # Get flow data
+            flow_data = mqtt_mgr.get_flow_history(200)
             
-            if filtered:
-                df = pd.DataFrame(filtered)
-                df['time'] = pd.to_datetime(df['received_at'].apply(datetime.fromtimestamp))
+            if flow_data and len(flow_data) > 0 and PLOTLY_AVAILABLE:
+                now = time.time()
+                cutoff_map = {"Live": 120, "15m": 900, "1h": 3600}
+                cutoff = now - cutoff_map.get(st.session_state.time_window, 120)
+                filtered = [d for d in flow_data if d.get('received_at', d.get('ts', 0)) >= cutoff]
                 
-                # Tabs for Flow and Battery history
-                tab_flow, tab_bat = st.tabs(["🌊 Flow History", "🔋 Battery History"])
-                
-                with tab_flow:
-                    if PLOTLY_AVAILABLE:
+                if filtered:
+                    df = pd.DataFrame(filtered)
+                    if 'flow' in df.columns:
+                        df['time'] = pd.to_datetime(df['received_at'].apply(datetime.fromtimestamp))
+                        
                         fig = go.Figure()
                         fig.add_trace(go.Scatter(
-                            x=df['time'], y=df['flow'], 
-                            mode='lines+markers',
-                            line=dict(color='#29b5e8', width=2), 
-                            marker=dict(size=4),
-                            name='Flow'
+                            x=df['time'], 
+                            y=df['flow'],
+                            mode='lines',
+                            fill='tozeroy',
+                            line=dict(color='#FF4B4B', width=2),
+                            fillcolor='rgba(255, 75, 75, 0.3)',
+                            name='Flow Rate'
                         ))
                         fig.update_layout(
-                            xaxis_title="Time", 
-                            yaxis_title="Flow (L/min)", 
-                            template="plotly_dark",
-                            height=280, 
-                            margin=dict(l=50, r=20, t=30, b=50),
-                            paper_bgcolor='#1a1a2e', 
-                            plot_bgcolor='#1a1a2e'
+                            height=220,
+                            margin=dict(l=40, r=20, t=10, b=30),
+                            paper_bgcolor='#262730',
+                            plot_bgcolor='#262730',
+                            xaxis=dict(showgrid=False, color='#888'),
+                            yaxis=dict(gridcolor='#333', color='#888', title='L/min'),
+                            showlegend=False,
+                            hovermode='x unified'
                         )
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
                     else:
-                        st.line_chart(df.set_index('time')['flow'], height=280, color='#29b5e8')
-                
-                with tab_bat:
-                    # If we have battery data, show it
-                    if state and state.get('battery') is not None:
-                        battery_val = state.get('battery', 0)
-                        # Create simple battery display since we may not have history
-                        st.markdown(f"### 🔋 Current: {battery_val}%")
-                        st.progress(min(100, max(0, int(battery_val))) / 100)
-                        if PLOTLY_AVAILABLE:
-                            # Create a gauge-like display
-                            fig = go.Figure(go.Indicator(
-                                mode="gauge+number",
-                                value=battery_val,
-                                domain={'x': [0, 1], 'y': [0, 1]},
-                                gauge={
-                                    'axis': {'range': [0, 100]},
-                                    'bar': {'color': "#4cd137"},
-                                    'bgcolor': "#1a1a2e",
-                                    'borderwidth': 2,
-                                    'bordercolor': "#333",
-                                    'steps': [
-                                        {'range': [0, 20], 'color': '#FF5252'},
-                                        {'range': [20, 50], 'color': '#FFC107'},
-                                        {'range': [50, 100], 'color': '#4cd137'}
-                                    ]
-                                },
-                                title={'text': "Battery Level", 'font': {'color': '#fff'}}
-                            ))
-                            fig.update_layout(
-                                height=250,
-                                paper_bgcolor='#1a1a2e',
-                                font={'color': '#fff'}
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.info("Battery data not available")
+                        st.info("Waiting for flow data...")
+                else:
+                    st.info("No data in selected window")
             else:
-                st.info("No data in selected window")
-        else:
-            st.info("📊 Waiting for data...")
-    
-    st.divider()
-    
-    # --- RESPONSE INSPECTOR (Latest ACKs & Info) ---
-    st.subheader("📝 Response Inspector")
-    
-    r1, r2, r3 = st.columns(3)
-    with r1:
-        with st.container(border=True):
-            st.markdown("**Latest State**")
-            if state:
-                st.json(state, expanded=False)
-                if state.get('ts') or state.get('updatedAt'):
-                    ts_val = state.get('ts') or state.get('updatedAt')
-                    st.caption(f"Time: {format_time_short(ts_val)}")
-            else:
-                st.caption("No data")
-    
-    with r2:
-        with st.container(border=True):
-            st.markdown("**Gateway Status**")
+                st.info("📊 Waiting for telemetry data...")
+        
+        # BOTTOM: Logs + Gateway Health
+        log_col, gw_col = st.columns([2, 1])
+        
+        with log_col:
+            st.markdown('<p class="section-header">System Logs</p>', unsafe_allow_html=True)
+            
+            # Build log HTML
+            log_html = '<div class="log-panel custom-scrollbar">'
+            for log in st.session_state.get('logs', [])[:15]:
+                color_class = f"log-{log['type']}"
+                log_html += f'<div class="log-entry"><span class="log-time">{log["time"]}</span> <span class="{color_class}">{log["message"]}</span></div>'
+            log_html += '</div>'
+            st.markdown(log_html, unsafe_allow_html=True)
+        
+        with gw_col:
+            st.markdown('<p class="section-header">Gateway Health</p>', unsafe_allow_html=True)
+            
             gateway = mqtt_mgr.get_gateway_status()
-            if gateway:
-                st.json(gateway, expanded=False)
-                if gateway.get('ts'):
-                    st.caption(f"Time: {format_time_short(gateway.get('ts'))}")
-            else:
-                st.caption("No data")
+            rssi = gateway.get('rssi', -42) if gateway else -42
+            uptime = gateway.get('uptime', '4d 12h') if gateway else '4d 12h'
+            signal_pct = min(100, max(0, (rssi + 100) * 2))
+            
+            st.markdown(f"""
+            <div class="gateway-panel">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <span style="font-size:13px;color:#9CA3AF;">Signal (RSSI)</span>
+                    <span style="font-family:'JetBrains Mono',monospace;color:#00E676;font-size:13px;">{rssi} dBm</span>
+                </div>
+                <div style="background:#374151;height:6px;border-radius:3px;overflow:hidden;margin-bottom:12px;">
+                    <div style="background:#00E676;height:100%;width:{signal_pct}%;"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-size:13px;color:#9CA3AF;">Uptime</span>
+                    <span style="font-family:'JetBrains Mono',monospace;color:#FAFAFA;font-size:13px;">{uptime}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
     
-    with r3:
-        with st.container(border=True):
-            st.markdown("**Connection Stats**")
-            st.json({
-                "connected": stats['connected'],
-                "mqtt_host": stats['mqtt_host'],
-                "mqtt_port": stats['mqtt_port'],
-                "reconnects": stats['reconnect_count'],
-                "last_msg": format_ago(stats['last_message_time'])
-            }, expanded=False)
-    
-# --- RAW DATA TABLES ---
-    c1, c2 = st.columns(2)
-    with c1:
-        with st.expander("📂 Raw Telemetry History", expanded=False):
-            tele = mqtt_mgr.get_telemetry(30)
-            if tele:
-                st.dataframe([{
-                    "Time": format_time_short(t.get('ts') or t.get('received_at')),
-                    "Flow": f"{t.get('flow', 0):.2f}",
-                    "Battery": f"{t.get('battery', '--')}%",
-                    "Valve": t.get('valve', '--')
-                } for t in tele], hide_index=True, use_container_width=True)
-            else:
-                st.info("No telemetry data yet...")
-    
-    with c2:
-        with st.expander("📜 Terminal Log (ACKs)", expanded=False):
-            acks = mqtt_mgr.get_acks(30)
-            if acks:
-                log_lines = []
-                for a in acks:
-                    ts = format_time_short(a.get('ts') or a.get('received_at'))
-                    ok = "OK" if a.get('ok') else "FAIL"
-                    cid = a.get('cid', '--')
-                    reason = a.get('reason', '')
-                    log_lines.append(f"[{ts}] CID={cid} {ok} {reason}")
-                st.code("\n".join(log_lines) if log_lines else "(empty)", language="text")
-            else:
-                st.code("(empty)", language="text")
-    
-    # Command history
-    with st.expander("📤 Sent Commands History", expanded=False):
-        cmds = mqtt_mgr.get_commands(30)
-        if cmds:
-            st.dataframe([{
-                "Time": format_time_short(c.get('sent_at')),
-                "CID": c.get('cid', '--'),
-                "Value": c.get('value', '--'),
-                "Topic": c.get('topic', '--').split('/')[-1]
-            } for c in cmds], hide_index=True, use_container_width=True)
+    # -------------------------------------------------------------------------
+    # RIGHT COLUMN: Status + Controls + History
+    # -------------------------------------------------------------------------
+    with col_right:
+        # VALVE STATUS CARD
+        glow_class = "valve-glow-open" if is_open else "valve-glow-closed"
+        icon_class = "valve-icon-open" if is_open else "valve-icon-closed"
+        text_class = "valve-text-open" if is_open else "valve-text-closed"
+        valve_display = "OPEN" if is_open else "CLOSED"
+        icon_color = "#00E676" if is_open else "#FF5252"
+        
+        valve_card_html = f'''<div class="valve-card">
+            <div class="{glow_class}"></div>
+            <p class="section-header" style="margin-bottom:16px;">VALVE STATUS</p>
+            <div class="{icon_class}">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="{icon_color}" stroke-width="2">
+                    <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
+                </svg>
+            </div>
+            <div class="{text_class}">{valve_display}</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px;">
+                <div class="metric-box">
+                    <p class="metric-label">Flow Rate</p>
+                    <p class="metric-value">{latest_flow:.1f} <span class="metric-unit">L/m</span></p>
+                </div>
+                <div class="metric-box">
+                    <p class="metric-label">Battery</p>
+                    <p class="metric-value" style="color:#FAFAFA;">{latest_battery} <span class="metric-unit">%</span></p>
+                </div>
+            </div>
+        </div>'''
+        st.markdown(valve_card_html, unsafe_allow_html=True)
+        
+        st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
+        
+        # CONTROL PANEL
+        st.markdown("""
+        <div class="valve-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <span style="font-weight:700;font-size:15px;color:#FAFAFA;">🎮 Controls</span>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Mode toggle
+        current_mode = st.session_state.get('current_mode', 'AUTO')
+        if state and isinstance(state, dict) and 'mode' in state:
+            current_mode = state.get('mode', 'AUTO').upper()
+            st.session_state.current_mode = current_mode
+        
+        mode_cols = st.columns(2)
+        with mode_cols[0]:
+            if st.button("🤖 AUTO", key="mode_auto", type="primary" if current_mode == "AUTO" else "secondary", use_container_width=True):
+                if current_mode != "AUTO":
+                    site = config['site']
+                    success, error = mqtt_mgr.publish(f"wfms/{site}/cmd/mode", {
+                        "cid": f"admin_{int(time.time()*1000)}",
+                        "value": "AUTO",
+                        "by": "admin_dashboard",
+                        "ts": int(time.time())
+                    })
+                    if success:
+                        st.session_state.current_mode = "AUTO"
+                        add_log("Switched to AUTO mode", "info")
+                        st.rerun()
+                    else:
+                        add_log(f"Mode switch failed: {error}", "error")
+        with mode_cols[1]:
+            if st.button("✋ MANUAL", key="mode_manual", type="primary" if current_mode == "MANUAL" else "secondary", use_container_width=True):
+                if current_mode != "MANUAL":
+                    site = config['site']
+                    success, error = mqtt_mgr.publish(f"wfms/{site}/cmd/mode", {
+                        "cid": f"admin_{int(time.time()*1000)}",
+                        "value": "MANUAL",
+                        "by": "admin_dashboard",
+                        "ts": int(time.time())
+                    })
+                    if success:
+                        st.session_state.current_mode = "MANUAL"
+                        add_log("Switched to MANUAL mode", "warn")
+                        st.rerun()
+                    else:
+                        add_log(f"Mode switch failed: {error}", "error")
+        
+        st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+        
+        # Valve control buttons (only enabled in MANUAL mode)
+        if current_mode == "AUTO":
+            st.markdown("""
+            <div class="lock-overlay">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2" style="margin-bottom:8px;">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+                <p style="font-size:14px;font-weight:600;color:#D1D5DB;margin:0;">Controls Locked</p>
+                <p style="font-size:12px;color:#6B7280;margin:4px 0 0 0;">Switch to MANUAL mode to operate</p>
+            </div>
+            """, unsafe_allow_html=True)
         else:
-            st.info("No commands sent yet...")
-    
-    # Debug expander
-    with st.expander("🔍 Debug Info"):
-        st.json({"gateway": mqtt_mgr.get_gateway_status(), "state": mqtt_mgr.get_state(), "stats": stats})
+            btn_cols = st.columns(2)
+            with btn_cols[0]:
+                if st.button("🟢 OPEN", key="valve_open", type="primary", use_container_width=True):
+                    site = config['site']
+                    success, error = mqtt_mgr.publish(f"wfms/{site}/cmd/valve", {
+                        "cid": f"admin_{int(time.time()*1000)}",
+                        "value": "ON",
+                        "by": "admin_dashboard",
+                        "ts": int(time.time())
+                    })
+                    if success:
+                        add_log("Command sent: OPEN VALVE", "success")
+                    else:
+                        add_log(f"Failed: {error}", "error")
+                    st.rerun()
+            with btn_cols[1]:
+                if st.button("🔴 CLOSE", key="valve_close", use_container_width=True):
+                    site = config['site']
+                    success, error = mqtt_mgr.publish(f"wfms/{site}/cmd/valve", {
+                        "cid": f"admin_{int(time.time()*1000)}",
+                        "value": "OFF",
+                        "by": "admin_dashboard",
+                        "ts": int(time.time())
+                    })
+                    if success:
+                        add_log("Command sent: CLOSE VALVE", "success")
+                    else:
+                        add_log(f"Failed: {error}", "error")
+                    st.rerun()
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+        st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
+        
+        # COMMAND HISTORY
+        st.markdown('<p class="section-header">📜 Recent Commands</p>', unsafe_allow_html=True)
+        
+        cmds = mqtt_mgr.get_commands(5)
+        if cmds:
+            cmd_html = '<div style="max-height:120px;overflow-y:auto;">'
+            for cmd in cmds:
+                cmd_time = format_time_short(cmd.get('sent_at'))
+                cmd_value = cmd.get('value', '--')
+                cmd_topic = cmd.get('topic', '').split('/')[-1]
+                action = f"CMD: {cmd_topic.upper()} {cmd_value}"
+                cmd_html += f"""
+                <div class="cmd-entry">
+                    <div>
+                        <div class="cmd-action">{action}</div>
+                        <div class="cmd-source">admin_dashboard</div>
+                    </div>
+                    <div class="cmd-time">{cmd_time}</div>
+                </div>
+                """
+            cmd_html += '</div>'
+            st.markdown(cmd_html, unsafe_allow_html=True)
+        else:
+            st.markdown('<p style="color:#6B7280;font-size:12px;text-align:center;">No commands sent yet</p>', unsafe_allow_html=True)
 
 
 # =============================================================================
-# PANEL HEALTH
+# NETWORK SETTING (Renamed from Configuration, MQTT only)
 # =============================================================================
 
-def render_panel_health():
-    st.header("🏥 Panel Health")
+def render_network_setting():
+    st.header("🌐 Network Setting")
+    config = get_config()
     mqtt_mgr = get_mqtt_manager()
     stats = mqtt_mgr.get_stats()
     
-    if st.button("🔄 Refresh", key="health_ref"):
-        st.session_state.health_data = None
+    # Current status
+    status_color = "#00E676" if stats['connected'] else "#FF5252"
+    status_text = "Connected" if stats['connected'] else "Disconnected"
     
-    if st.session_state.health_data is None:
-        ok, data, err = api_get("/health")
-        st.session_state.health_data = data
-        st.session_state.health_error = err
-    
-    st.divider()
-    st.subheader("🌐 Gateway Health")
-    
-    health = st.session_state.health_data
-    if st.session_state.health_error:
-        st.error(f"❌ {st.session_state.health_error}")
-    
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric("Status", f"{'🟢' if health and health.get('status') == 'ok' else '🔴'} {health.get('status', 'N/A').upper() if health else 'N/A'}")
-    with c2:
-        st.metric("Uptime", format_uptime(health.get('uptime')) if health else "N/A")
-    with c3:
-        st.metric("Version", health.get('version', health.get('build', 'N/A')) if health else "N/A")
-    with c4:
-        st.metric("Updated", format_timestamp(health.get('ts')) if health else "N/A")
+    st.markdown(f"""
+    <div class="valve-card" style="margin-bottom: 20px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+            <div style="width:12px;height:12px;border-radius:50%;background:{status_color};"></div>
+            <span style="color:#FAFAFA;font-weight:600;">MQTT Status: {status_text}</span>
+        </div>
+        <div style="margin-top:12px;font-family:'JetBrains Mono',monospace;font-size:13px;color:#9CA3AF;">
+            Current: {config['mqtt_host']}:{config['mqtt_port']} | Site: {config['site']}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
     st.divider()
-    st.subheader("🔌 Connectivity")
-    
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric("MQTT", f"{'🟢 Connected' if stats['connected'] else '🔴 Disconnected'}")
-    with c2:
-        st.metric("Reconnects", stats['reconnect_count'])
-    with c3:
-        st.metric("Last Msg", format_ago(stats['last_message_time']))
-    with c4:
-        uart = health.get('uart', 'N/A') if health else 'N/A'
-        st.metric("UART", f"{'🟢' if uart in ['connected', True, 'ok'] else '🔴'} {uart}")
-    
-    st.divider()
-    st.subheader("📡 Nodes")
-    
-    if health and 'nodes' in health and health['nodes']:
-        st.dataframe([{"ID": n.get('id', '--'), "Type": n.get('type', '--'),
-                       "Status": "🟢" if n.get('online') else "🔴",
-                       "Battery": f"{n.get('battery', '--')}%",
-                       "Last Seen": format_ago(n.get('last_seen'))} for n in health['nodes']], hide_index=True)
-    else:
-        state = mqtt_mgr.get_state()
-        if state:
-            c1, c2 = st.columns(2)
-            with c1:
-                st.metric("Valve Node", state.get('valveNodeId', 'N/A'))
-            with c2:
-                st.metric("Known", "Yes" if state.get('valveKnown') else "No")
-        else:
-            st.info("No node data")
-    
-    with st.expander("🔍 Raw"):
-        st.json(health or {})
-
-
-# =============================================================================
-# RULE CONTROL
-# =============================================================================
-
-def render_rule_control():
-    st.header("⚙️ Rule Control")
-    
-    if st.button("📥 Load", key="rules_load"):
-        st.session_state.rules_data = None
-    
-    if st.session_state.rules_data is None:
-        ok, data, err = api_get("/rules")
-        if ok:
-            st.session_state.rules_data = data
-        else:
-            st.warning(f"⚠️ {err}")
-            st.session_state.rules_data = {'lock': False, 'cooldown_user_s': 0, 'cooldown_global_s': 0,
-                                           'dedupe_ttl_s': 60, 'ack_timeout_s': 3}
-    
-    rules = st.session_state.rules_data or {}
-    st.divider()
-    
-    st.subheader("🔒 System Lock")
-    new_lock = st.toggle("Enable Lock", rules.get('lock', False))
-    if new_lock:
-        st.error("⚠️ SYSTEM LOCKED")
-    
-    st.divider()
-    st.subheader("⏱️ Cooldowns")
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        new_user_cd = st.number_input("User (s)", 0, 3600, int(rules.get('cooldown_user_s', 0)))
-    with c2:
-        new_global_cd = st.number_input("Global (s)", 0, 3600, int(rules.get('cooldown_global_s', 0)))
-    
-    with st.expander("🔧 Advanced"):
-        c1, c2 = st.columns(2)
-        with c1:
-            new_dedupe = st.number_input("Dedupe TTL (s)", 0, 3600, int(rules.get('dedupe_ttl_s', 60)))
-        with c2:
-            new_ack_to = st.number_input("ACK Timeout (s)", 1, 60, int(rules.get('ack_timeout_s', 3)))
-    
-    st.divider()
-    if st.button("✅ Apply", type="primary"):
-        payload = {}
-        if new_lock != rules.get('lock'): payload['lock'] = new_lock
-        if new_user_cd != rules.get('cooldown_user_s'): payload['cooldown_user_s'] = new_user_cd
-        if new_global_cd != rules.get('cooldown_global_s'): payload['cooldown_global_s'] = new_global_cd
-        if new_dedupe != rules.get('dedupe_ttl_s'): payload['dedupe_ttl_s'] = new_dedupe
-        if new_ack_to != rules.get('ack_timeout_s'): payload['ack_timeout_s'] = new_ack_to
-        
-        if payload:
-            ok, _, err = api_post("/rules", payload)
-            if ok:
-                st.success("✅ Applied!")
-                st.session_state.rules_data.update(payload)
-            else:
-                st.error(f"❌ {err}")
-        else:
-            st.info("No changes")
-    
-    with st.expander("📋 Current"):
-        st.json(rules)
-
-
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
-def render_configuration():
-    st.header("🔧 Configuration")
-    config = get_config()
-    
-    st.info(f"**Current:** API: `{config['api_base_url']}` | MQTT: `{config['mqtt_host']}:{config['mqtt_port']}` | Site: `{config['site']}`")
-    st.divider()
-    
-    st.subheader("📝 Edit")
-    
-    new_api = st.text_input("API URL", config['api_base_url'])
+    st.subheader("📝 MQTT Configuration")
     
     c1, c2 = st.columns(2)
     with c1:
@@ -1085,91 +1173,206 @@ def render_configuration():
     
     c1, c2 = st.columns(2)
     with c1:
-        new_mqtt_user = st.text_input("MQTT User", config['mqtt_user'])
+        new_mqtt_user = st.text_input("MQTT Username", config['mqtt_user'])
     with c2:
-        new_mqtt_pass = st.text_input("MQTT Pass", config['mqtt_pass'], type="password")
+        new_mqtt_pass = st.text_input("MQTT Password", config['mqtt_pass'], type="password")
     
-    new_site = st.text_input("Site", config['site'])
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        ports = get_available_com_ports()
-        if config['uart_port'] not in ports:
-            ports.append(config['uart_port'])
-        new_uart = st.selectbox("UART", sorted(ports), index=sorted(ports).index(config['uart_port']) if config['uart_port'] in ports else 0)
-    with c2:
-        bauds = [9600, 19200, 38400, 57600, 115200]
-        new_baud = st.selectbox("Baud", bauds, index=bauds.index(config['uart_baud']) if config['uart_baud'] in bauds else 4)
+    new_site = st.text_input("Site ID", config['site'], help="MQTT topic prefix: wfms/{site}/...")
     
     st.divider()
-    c1, c2, c3 = st.columns([1, 1, 3])
+    
+    c1, c2, c3 = st.columns([1, 1, 2])
     
     with c1:
-        if st.button("✅ Apply", type="primary"):
+        if st.button("✅ Apply & Reconnect", type="primary"):
             st.session_state.config = {
-                "api_base_url": new_api, "mqtt_host": new_mqtt_host, "mqtt_port": int(new_mqtt_port),
-                "mqtt_user": new_mqtt_user, "mqtt_pass": new_mqtt_pass, "site": new_site,
-                "uart_port": new_uart, "uart_baud": int(new_baud),
+                **config,
+                "mqtt_host": new_mqtt_host, 
+                "mqtt_port": int(new_mqtt_port),
+                "mqtt_user": new_mqtt_user, 
+                "mqtt_pass": new_mqtt_pass, 
+                "site": new_site,
             }
             st.session_state.config_applied_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             reconnect_mqtt()
-            st.success("✅ Applied!")
+            add_log(f"Network config updated: {new_mqtt_host}:{new_mqtt_port}", "success")
+            st.success("✅ Configuration applied!")
             time.sleep(1)
             st.rerun()
     
     with c2:
-        if st.button("📤 Sync Gateway"):
-            ok, _, err = api_post("/config", {"uart_port": new_uart, "uart_baud": int(new_baud)})
-            st.success("✅ Synced!") if ok else st.error(f"❌ {err}")
+        if st.button("🔄 Reset to Default"):
+            st.session_state.config = DEFAULT_CONFIG.copy()
+            reconnect_mqtt()
+            add_log("Network config reset to default", "info")
+            st.rerun()
     
-    with st.expander("📋 JSON"):
-        st.json(config)
-    
+    # Connection test
     st.divider()
-    if st.button("🔄 Reset"):
-        st.session_state.config = DEFAULT_CONFIG.copy()
-        reconnect_mqtt()
-        st.rerun()
+    st.subheader("🔌 Connection Test")
+    
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric("Status", "🟢 OK" if stats['connected'] else "🔴 Fail")
+    with c2:
+        st.metric("Reconnects", stats['reconnect_count'])
+    with c3:
+        st.metric("Last Message", format_ago(stats['last_message_time']))
+    with c4:
+        st.metric("Errors", stats['parse_error_count'])
 
 
 # =============================================================================
-# SYSTEM LOGS
+# SYSTEM LOGS (Combined with all JSON/Debug data)
 # =============================================================================
 
 def render_system_logs():
-    st.header("📋 System Logs")
+    st.header("📋 System Logs & Debug Data")
     
-    c1, c2, c3 = st.columns([1, 1, 3])
-    with c1:
-        tail = st.selectbox("Lines", [100, 200, 500, 1000], index=1)
-    with c2:
-        filt = st.text_input("Filter", placeholder="keyword...")
-    with c3:
-        st.write("")
-        st.write("")
-        refresh = st.button("🔄 Refresh", key="logs_ref")
+    mqtt_mgr = get_mqtt_manager()
+    stats = mqtt_mgr.get_stats()
+    config = get_config()
     
-    if refresh or st.session_state.logs_data is None:
-        ok, data, err = api_get(f"/logs?tail={tail}")
-        st.session_state.logs_data = data
-        st.session_state.logs_error = err
+    # Tabs for different log types
+    tab_logs, tab_telemetry, tab_acks, tab_commands, tab_debug = st.tabs([
+        "📋 Activity Logs", "📡 Telemetry Data", "✅ ACK Responses", "📤 Command History", "🔍 Debug Info"
+    ])
     
-    st.divider()
-    
-    if st.session_state.logs_error:
-        st.error(f"❌ {st.session_state.logs_error}")
-    
-    if st.session_state.logs_data:
-        logs = st.session_state.logs_data.get('logs', [])
+    # --- ACTIVITY LOGS ---
+    with tab_logs:
+        c1, c2, c3 = st.columns([1, 1, 3])
+        with c1:
+            tail = st.selectbox("Show lines", [50, 100, 200, 500], index=1)
+        with c2:
+            filt = st.text_input("Filter", placeholder="keyword...", key="log_filter")
+        with c3:
+            st.write("")
+            st.write("")
+            if st.button("🔄 Refresh API Logs", key="logs_ref"):
+                st.session_state.logs_data = None
+        
+        # Local activity logs
+        st.subheader("Local Activity")
+        logs = st.session_state.get('logs', [])[:tail]
         if filt:
-            logs = [l for l in logs if filt.lower() in l.lower()]
-            st.caption(f"Filtered: {len(logs)} lines")
+            logs = [l for l in logs if filt.lower() in l['message'].lower()]
+        
         if logs:
-            st.code("\n".join(logs), language="log", line_numbers=True)
+            log_text = "\n".join([f"[{l['time']}] [{l['type'].upper()}] {l['message']}" for l in logs])
+            st.code(log_text, language="log", line_numbers=True)
         else:
-            st.info("No logs" + (f" matching '{filt}'" if filt else ""))
-    else:
-        st.info("Click Refresh")
+            st.info("No local logs")
+        
+        # API logs
+        st.subheader("Gateway API Logs")
+        if st.session_state.logs_data is None:
+            ok, data, err = api_get(f"/logs?tail={tail}")
+            st.session_state.logs_data = data
+            st.session_state.logs_error = err
+        
+        if st.session_state.logs_error:
+            st.warning(f"⚠️ Cannot fetch API logs: {st.session_state.logs_error}")
+        elif st.session_state.logs_data:
+            api_logs = st.session_state.logs_data.get('logs', [])
+            if filt:
+                api_logs = [l for l in api_logs if filt.lower() in l.lower()]
+            if api_logs:
+                st.code("\n".join(api_logs), language="log", line_numbers=True)
+            else:
+                st.info("No API logs" + (f" matching '{filt}'" if filt else ""))
+    
+    # --- TELEMETRY DATA ---
+    with tab_telemetry:
+        st.subheader("📡 Raw Telemetry History")
+        tele = mqtt_mgr.get_telemetry(50)
+        if tele:
+            st.dataframe([{
+                "Time": format_time_short(t.get('ts') or t.get('received_at')),
+                "Flow": f"{t.get('flow', 0):.2f}",
+                "Battery": f"{t.get('battery', '--')}%",
+                "Valve": t.get('valve', '--')
+            } for t in tele], hide_index=True, use_container_width=True)
+            
+            with st.expander("📋 Raw JSON Data"):
+                st.json(tele[:10])
+        else:
+            st.info("No telemetry data yet...")
+    
+    # --- ACK RESPONSES ---
+    with tab_acks:
+        st.subheader("✅ ACK Responses from Gateway")
+        acks = mqtt_mgr.get_acks(50)
+        if acks:
+            log_lines = []
+            for a in acks:
+                ts = format_time_short(a.get('ts') or a.get('received_at'))
+                ok = "✅ OK" if a.get('ok') else "❌ FAIL"
+                cid = a.get('cid', '--')
+                reason = a.get('reason', '')
+                log_lines.append(f"[{ts}] CID={cid} {ok} {reason}")
+            st.code("\n".join(log_lines), language="text")
+            
+            with st.expander("📋 Raw JSON Data"):
+                st.json(acks[:10])
+        else:
+            st.info("No ACK responses yet...")
+    
+    # --- COMMAND HISTORY ---
+    with tab_commands:
+        st.subheader("📤 Sent Commands History")
+        cmds = mqtt_mgr.get_commands(50)
+        if cmds:
+            st.dataframe([{
+                "Time": format_time_short(c.get('sent_at')),
+                "CID": c.get('cid', '--'),
+                "Value": c.get('value', '--'),
+                "Topic": c.get('topic', '--').split('/')[-1]
+            } for c in cmds], hide_index=True, use_container_width=True)
+            
+            with st.expander("📋 Raw JSON Data"):
+                st.json(cmds[:10])
+        else:
+            st.info("No commands sent yet...")
+    
+    # --- DEBUG INFO ---
+    with tab_debug:
+        st.subheader("🔍 Debug Information")
+        
+        # Current State
+        st.markdown("#### Latest State")
+        state = mqtt_mgr.get_state()
+        if state:
+            st.json(state)
+        else:
+            st.info("No state data")
+        
+        # Gateway Status
+        st.markdown("#### Gateway Status")
+        gateway = mqtt_mgr.get_gateway_status()
+        if gateway:
+            st.json(gateway)
+        else:
+            st.info("No gateway status")
+        
+        # Connection Stats
+        st.markdown("#### Connection Statistics")
+        st.json({
+            "connected": stats['connected'],
+            "mqtt_host": stats['mqtt_host'],
+            "mqtt_port": stats['mqtt_port'],
+            "reconnect_count": stats['reconnect_count'],
+            "parse_error_count": stats['parse_error_count'],
+            "telemetry_count": stats['telemetry_count'],
+            "ack_count": stats['ack_count'],
+            "cmd_count": stats['cmd_count'],
+            "last_message": format_ago(stats['last_message_time']),
+            "connect_time": format_timestamp(stats['connect_time']),
+            "last_error": stats['last_error']
+        })
+        
+        # Current Config
+        st.markdown("#### Current Configuration")
+        st.json(config)
 
 
 # =============================================================================
@@ -1177,8 +1380,12 @@ def render_system_logs():
 # =============================================================================
 
 def main():
-    st.set_page_config(page_title=f"WFMS Admin - {DEFAULT_CONFIG['site']}", page_icon="🚰",
-                       layout="wide", initial_sidebar_state="expanded")
+    st.set_page_config(
+        page_title=f"WFMS Admin - {DEFAULT_CONFIG['site']}", 
+        page_icon="🚰",
+        layout="wide", 
+        initial_sidebar_state="expanded"
+    )
     
     init_session_state()
     inject_custom_css()
@@ -1188,14 +1395,14 @@ def main():
     page = st.session_state.current_page
     if page == "Live View":
         render_live_view()
-    elif page == "Panel Health":
-        render_panel_health()
-    elif page == "Rule Control":
-        render_rule_control()
-    elif page == "Configuration":
-        render_configuration()
+    elif page == "Network Setting":
+        render_network_setting()
     elif page == "System Logs":
         render_system_logs()
+    else:
+        # Default to Live View for any unknown page
+        st.session_state.current_page = "Live View"
+        render_live_view()
 
 
 if __name__ == "__main__":
