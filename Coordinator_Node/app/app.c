@@ -8,6 +8,7 @@
 #include "buttons.h"
 #include "cli_commands.h"
 #include "app/framework/include/af.h"
+#include "stack/include/trust-center.h"  // For emberTrustCenterLinkKeyRequestPolicies
 
 // Periodic @DATA output for Dashboard
 #define DATA_REPORT_INTERVAL_MS  5000   // Send @DATA every 5 seconds (was 2s)
@@ -23,6 +24,12 @@ static app_mode_t s_lastSentMode = MODE_AUTO;
 
 void emberAfMainInitCallback(void)
 {
+  // === CRITICAL: Set Trust Center Link Key Request Policy ===
+  // Allow joining devices to request/update TCLK (fixes "Error 0x04" on sensor)
+  // Index 0 = policy for endpoint 0 (or default policy)
+  emberTrustCenterLinkKeyRequestPolicies[0] = EMBER_ALLOW_TC_LINK_KEY_REQUEST_AND_GENERATE_NEW_KEY;
+  emberAfCorePrintln("APP: Set TCLK policy = ALLOW_AND_GENERATE_NEW_KEY");
+
   // Register custom CLI commands (json, info, data)
   customCliInit();
   
@@ -47,7 +54,15 @@ void emberAfMainInitCallback(void)
 
 void emberAfMainTickCallback(void)
 {
+  static uint32_t s_lastTickPrint = 0;
   uint32_t now = halCommonGetInt32uMillisecondTick();
+
+  // DEBUG: Print every 5 seconds - ONLY in IDE Mode (not Dashboard Mode)
+  // In Dashboard Mode, this would cause UART collision with JSON protocol
+  if (!g_uartGatewayEnabled && (now - s_lastTickPrint) >= 5000u) {
+    s_lastTickPrint = now;
+    emberAfCorePrintln("[TICK] alive");
+  }
 
   // 0) Process button actions (deferred from ISR)
   buttonsTick();
@@ -64,7 +79,10 @@ void emberAfMainTickCallback(void)
   // 3) Network manager
   netMgrTick();
 
-  // 4) Periodic @DATA output for Dashboard
+  // 4) HEARTBEAT: Periodic @INFO (every 30 seconds for Dashboard)
+  appLogHeartbeatTick();
+
+  // 5) Periodic @DATA output for Dashboard
   //    - Only send if data changed OR force interval passed
   //    - Reduces UART spam when data is static (e.g., no sensor connected)
   if (g_uartGatewayEnabled && (now - s_lastDataReport) >= DATA_REPORT_INTERVAL_MS) {

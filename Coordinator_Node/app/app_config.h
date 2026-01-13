@@ -30,4 +30,13 @@
   #endif
 #endif
 
+// ===== Debug print control =====
+// Comment out to disable debug prints (improves UART reliability)
+// #define DEBUG_LCD_PRINTS     1
+// #define DEBUG_NET_PRINTS     1
+// #define DEBUG_VALVE_PRINTS   1
+
+// Keep protocol prints (required for Gateway communication)
+#define ENABLE_PROTOCOL_PRINTS  1
+
 #endif

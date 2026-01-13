@@ -68,12 +68,23 @@ static EmberStatus queueValveOnOff(bool wantOpen, bool useDirect)
 
 bool valveCtrlQueueTx(uint32_t id, bool wantOpen)
 {
+  // A1: For errors when id=0 (auto mode), use @LOG instead of @ACK
+  // A2: For valid id, ACK will be sent in tx_done callback (not here)
+  
   if (emberAfNetworkState() != EMBER_JOINED_NETWORK) {
-    appLogAck(id, false, "not joined");
+    if (id == 0) {
+      appLogLog("ZB", "valve_reject", "\"reason\":\"not_joined\"");
+    } else {
+      appLogAck(id, false, "not joined");
+    }
     return false;
   }
   if (g_tx.active) {
-    appLogAck(id, false, "busy: tx_pending");
+    if (id == 0) {
+      appLogLog("ZB", "valve_reject", "\"reason\":\"tx_pending\"");
+    } else {
+      appLogAck(id, false, "busy: tx_pending");
+    }
     return false;
   }
 
@@ -85,15 +96,23 @@ bool valveCtrlQueueTx(uint32_t id, bool wantOpen)
   else useDirect = canDirect; // AUTO
 
   if (useDirect && !canDirect) {
-    appLogAck(id, false, "direct requires valve_node_id");
+    if (id == 0) {
+      appLogLog("ZB", "valve_reject", "\"reason\":\"direct_requires_node_id\"");
+    } else {
+      appLogAck(id, false, "direct requires valve_node_id");
+    }
     return false;
   }
 
   EmberStatus st = queueValveOnOff(wantOpen, useDirect);
   if (st != EMBER_SUCCESS) {
-    char buf[48];
-    snprintf(buf, sizeof(buf), "send_fail_immediate:0x%02X", st);
-    appLogAck(id, false, buf);
+    if (id == 0) {
+      appLogLog("ZB", "valve_reject", "\"reason\":\"send_fail\",\"zstatus\":\"0x%02X\"", (unsigned)st);
+    } else {
+      char buf[48];
+      snprintf(buf, sizeof(buf), "send_fail_immediate:0x%02X", st);
+      appLogAck(id, false, buf);
+    }
     return false;
   }
 
@@ -103,8 +122,12 @@ bool valveCtrlQueueTx(uint32_t id, bool wantOpen)
   g_tx.usedDirect = useDirect;
   g_tx.dstOrIndex = useDirect ? (uint16_t)g_valveNodeId : (uint16_t)g_valveBindIndex;
 
-  appLogAck(id, true, useDirect ? "queued:direct" : "queued:binding");
-  appLogData();
+  // A1: Progress log (not ACK) - ACK will come in tx_done callback
+  appLogLog("ZB", "valve_queued", "\"id\":%lu,\"path\":\"%s\",\"want\":\"%s\"",
+    (unsigned long)id,
+    useDirect ? "direct" : "binding",
+    wantOpen ? "open" : "close"
+  );
   return true;
 }
 
@@ -170,15 +193,28 @@ bool emberAfMessageSentCallback(EmberOutgoingMessageType type,
 
   if (apsFrame->clusterId == ZCL_ON_OFF_CLUSTER_ID && apsFrame->sourceEndpoint == COORD_EP_CONTROL) {
     if (g_tx.active) {
-      emberAfCorePrintln(
-        "@LOG {\"event\":\"tx_done\",\"id\":%lu,\"st\":\"0x%02X\",\"path\":\"%s\",\"dst_or_index\":\"0x%04X\"}",
+      bool txOk = (status == EMBER_SUCCESS);
+      
+      // A2: Send final @ACK only for valid command IDs (not auto mode id=0)
+      if (g_tx.cmdId != 0) {
+        if (txOk) {
+          appLogAckZb(g_tx.cmdId, true, "done", status, "done");
+        } else {
+          appLogAckZb(g_tx.cmdId, false, "tx_failed", status, "done");
+        }
+      }
+      
+      // A1: Always log tx result for debugging
+      appLogLog("ZB", txOk ? "tx_done" : "tx_fail",
+        "\"id\":%lu,\"zstatus\":\"0x%02X\",\"path\":\"%s\",\"dst\":\"0x%04X\",\"want\":\"%s\"",
         (unsigned long)g_tx.cmdId,
         (unsigned)status,
         g_tx.usedDirect ? "direct" : "binding",
-        (unsigned)g_tx.dstOrIndex
+        (unsigned)g_tx.dstOrIndex,
+        g_tx.wantOpen ? "open" : "close"
       );
 
-      if (status == EMBER_SUCCESS) {
+      if (txOk) {
         g_valveOpen = g_tx.wantOpen;
         lcd_ui_set_valve(g_valveOpen);  // Update LCD when valve state confirmed
       }
@@ -201,15 +237,31 @@ void emberAfTrustCenterJoinCallback(EmberNodeId newNodeId,
   (void)parentOfNewNode;
   (void)decision;
 
-  if (!g_valveKnown) return;  // newNodeEui64 is not NULL (it's an array param)
+#ifdef DEBUG_NET_PRINTS
+  // Log all TC join events for debugging
+  char euiStr[17];
+  for (int i = 0; i < 8; i++) {
+    sprintf(&euiStr[i * 2], "%02X", newNodeEui64[i]);
+  }
+  euiStr[16] = '\0';
+
+  appLogLog("NET", "tc_join",
+    "\"node_id\":\"0x%04X\",\"eui64\":\"%s\",\"status\":%u,\"decision\":%u",
+    (unsigned)newNodeId, euiStr, (unsigned)status, (unsigned)decision
+  );
+#endif
+
+  if (!g_valveKnown) return;
 
   if (memcmp(newNodeEui64, g_valveEuiLe, EUI64_SIZE) == 0) {
     g_valveNodeId = newNodeId;
     (void)emberSetBindingRemoteNodeId(g_valveBindIndex, newNodeId);
 
-    emberAfCorePrintln("@LOG {\"event\":\"valve_nodeid_update\",\"node_id\":\"0x%04X\",\"status\":%u}",
-                       (uint16_t)newNodeId, (unsigned)status);
-    printInfoToPC();
+    appLogLog("ZB", "valve_nodeid_update",
+      "\"node_id\":\"0x%04X\",\"status\":%u",
+      (unsigned)newNodeId, (unsigned)status
+    );
+    appLogInfo();
   }
 }
 
