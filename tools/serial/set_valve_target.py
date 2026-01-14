@@ -5,7 +5,7 @@ Set Valve Target on Coordinator
 import serial
 import time
 
-COM_PORT = "COM13"
+COM_PORT = "COM11"
 BAUD_RATE = 115200
 VALVE_EUI64 = "0000000000000054"
 

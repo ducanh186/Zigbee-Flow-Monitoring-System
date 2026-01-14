@@ -59,7 +59,7 @@ cp .env.example .env
 
 | Variable | Example | Purpose |
 |----------|---------|---------|
-| `UART_PORT` | `COM13` | Serial port (Windows: `COM*`, Linux: `/dev/ttyUSB*`) |
+| `UART_PORT` | `COM11` | Serial port (Windows: `COM*`, Linux: `/dev/ttyUSB*`) |
 | `UART_BAUD` | `115200` | Serial baud rate |
 | `MQTT_HOST` | `127.0.0.1` | MQTT broker address |
 | `MQTT_PORT` | `1883` | MQTT broker port |
@@ -259,7 +259,6 @@ client.loop_forever()
 
 ## References
 
-- [.github/copilot-instructions.md](../../.github/copilot-instructions.md) — System architecture & conventions
 - [../Coordinator_Node/](../Coordinator_Node/) — Zigbee firmware (C)
 - [../tools/mqtt/](../tools/mqtt/) — MQTT broker management scripts
 - [../tests/smoke/](../tests/smoke/) — Sanity tests & smoke tests
