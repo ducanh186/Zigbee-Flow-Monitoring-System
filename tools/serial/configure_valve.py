@@ -5,7 +5,7 @@ Configure Coordinator to control Valve Node 0x1D34
 import serial
 import time
 
-COM_PORT = "COM13"
+COM_PORT = "COM11"
 BAUD_RATE = 115200
 VALVE_EUI64 = "0000000000000054"
 VALVE_NODE_ID = "0x1D34"

@@ -82,6 +82,7 @@ if ($portInUse) {
             Start-Sleep -Seconds 2
         }
     }
+}
 } else {
     Write-Host "✓ Port 1883 is available" -ForegroundColor Green
 }

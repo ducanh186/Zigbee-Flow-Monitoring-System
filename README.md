@@ -59,140 +59,108 @@ cd wfms
 pip install -r requirements.txt
 ```
 
-### 3. Run Dashboard (MQTT-based, PC A ↔ PC B)
+### 3. Configure Environment
 
-#### A. Manual quick procedure every time PC A boots
+Create a `.env` file in the `wfms/` directory (copy from `.env.example`):
 
-1) **Check Radmin VPN**
+```bash
+cd wfms
+copy .env.example .env
+# Edit .env and set your COM port and MQTT broker address
+```
 
-- Open Radmin VPN on PC A and ensure the status is **Connected**.
-- Note the virtual IP of PC A (for example `26.188.98.128`; this may change).
+Key configuration variables:
+- `UART_PORT` - Serial port for coordinator (e.g., COM11, /dev/ttyUSB0)
+- `MQTT_HOST` - MQTT broker address (localhost for local, or LAN IP for remote access)
+- `MQTT_PORT` - MQTT broker port (default: 1883)
+- `SITE` - Site identifier for MQTT topics (default: lab1)
 
-2) **Check Mosquitto (MQTT broker)**
+### 4. Start the System
 
-In an elevated PowerShell window on PC A:
+The system requires two components running: **MQTT Broker** and **Gateway Service**.
+
+#### Step 1: Start MQTT Broker
+
+**Terminal 1** - Start Mosquitto broker:
 
 ```powershell
-Get-Service mosquitto
+cd tools\mqtt
+.\start_broker.ps1
 ```
 
-- If the service is not `Running`, start it:
+Expected output:
+```
+mosquitto version 2.0.x starting
+Config loaded from mosquitto.conf
+Opening ipv4 listen socket on port 1883
+mosquitto version 2.0.x running
+```
+
+**Keep this terminal running.**
+
+#### Step 2: Start Gateway Service
+
+**Terminal 2** - Start the gateway (UART ↔ MQTT bridge):
 
 ```powershell
-Start-Service mosquitto
+cd wfms
+python -m gateway.service
 ```
 
-- Verify the broker is listening on port `1883`:
+Expected output:
+```
+[INFO] gateway: WFMS Gateway Service Starting
+[INFO] gateway: Site: lab1
+[INFO] gateway: MQTT: localhost:1883
+[INFO] gateway: UART: COM11 @ 115200
+[INFO] gateway.uart: UART connected: COM11 @ 115200
+[INFO] gateway: ✓ MQTT connected
+[INFO] gateway: ✓ Subscribed to wfms/lab1/cmd/valve
+```
+
+**Keep this terminal running.**
+
+#### Step 3: Start Dashboard (Optional)
+
+**Terminal 3** - Start the web dashboard:
 
 ```powershell
-netstat -ano | findstr :1883
+cd wfms
+streamlit run dashboards\admin\admin_dashboard.py --server.address 0.0.0.0 --server.port 8501
 ```
 
-You should see `26.188.98.128:1883 LISTENING` and/or `0.0.0.0:1883 LISTENING`.
+Access the dashboard at: `http://localhost:8501`
 
-3) **Start Gateway (UART↔MQTT bridge)**
+### 5. Verify System Operation
 
-In PowerShell on PC A:
+#### Check MQTT Broker
+```powershell
+# Test MQTT connection
+mosquitto_sub -h localhost -t "wfms/lab1/#" -v
+```
+
+#### Check Gateway Status
+```powershell
+# Call Admin API
+curl http://127.0.0.1:8080/status
+```
+
+#### Monitor Live Data
+```powershell
+cd tools\mqtt
+python mqtt_monitor.py
+```
+
+### Testing Without Hardware
+
+Run the gateway in simulation mode:
 
 ```powershell
-cd "C:\Users\Admin\Downloads\Zigbee-Flow-Monitoring-System-main\Zigbee-Flow-Monitoring-System-main"
-& ".\wfms\gateway\.venv\Scripts\python.exe" -m wfms.gateway.service
+cd wfms
+python -m gateway.service --fake-uart
 ```
 
-Healthy signs:
-- `UART connected: COM4 @ 115200`
-- `✓ MQTT connected`
-- Subscription logs like `subscribe wfms/lab1/cmd/...`
-- Continuous `@DATA` / `@INFO` frames in the log
-
-4) **Start Web Admin (Streamlit dashboard)**
-
-Open another PowerShell window on PC A:
-
-```powershell
-cd "C:\Users\Admin\Downloads\Zigbee-Flow-Monitoring-System-main\Zigbee-Flow-Monitoring-System-main"
-& ".\wfms\gateway\.venv\Scripts\python.exe" -m streamlit run \
-  ".\wfms\dashboards\admin\admin_dashboard.py" \
-  --server.address 0.0.0.0 --server.port 8501
-```
-
-- If you also run a separate **user dashboard**, start it on another port, for example `8502`.
-
-5) **PC B accesses the web dashboard**
-
-On PC B (any network, as long as Radmin VPN is connected):
-
-- Open the Admin dashboard in a browser:
-  - `http://26.188.98.128:8501` (replace with PC A's current Radmin IP)
-
-- Quick connectivity tests from PC B (PowerShell):
-
-```powershell
-Test-NetConnection 26.188.98.128 -Port 8501
-Test-NetConnection 26.188.98.128 -Port 1883
-```
-
-#### B. One-time setup (auto-start on boot)
-
-1) **Disable Sleep / Hibernate**
-
-- In Windows power settings on PC A, set **Sleep = Never** (when plugged in).
-
-2) **Configure Mosquitto to auto-start**
-
-You already did:
-
-```powershell
-Set-Service mosquitto -StartupType Automatic
-```
-
-3) **Create two .bat files for auto-run**
-
-Create `start_gateway.bat`:
-
-```bat
-@echo off
-cd /d "C:\Users\Admin\Downloads\Zigbee-Flow-Monitoring-System-main\Zigbee-Flow-Monitoring-System-main"
-.\wfms\gateway\.venv\Scripts\python.exe -m wfms.gateway.service
-```
-
-Create `start_admin_ui.bat`:
-
-```bat
-@echo off
-cd /d "C:\Users\Admin\Downloads\Zigbee-Flow-Monitoring-System-main\Zigbee-Flow-Monitoring-System-main"
-.\wfms\gateway\.venv\Scripts\python.exe -m streamlit run \
-  ".\wfms\dashboards\admin\admin_dashboard.py" \
-  --server.address 0.0.0.0 --server.port 8501
-```
-
-4) **Create two Task Scheduler tasks**
-
-- Task 1: Trigger **At log on** (or **At startup**), Action = run `start_gateway.bat`.
-- Task 2: Trigger **At log on** (or **At startup**), Action = run `start_admin_ui.bat`.
-- In both tasks, tick **Run with highest privileges**.
-
-From now on, after you power on PC A and log in, the gateway and web dashboard start automatically.
-
-#### C. If something is broken, check in this order
-
-1) **MQTT broker** — on PC A:
-
-```powershell
-Get-Service mosquitto
-```
-
-Ensure the service is running.
-
-2) **Gateway logs** — confirm both `✓ MQTT connected` and `UART connected` appear.
-
-3) **Streamlit logs** — ensure you see:
-
-```text
-Running on http://0.0.0.0:8501
-```
-
-Optionally, you can create a `start_all.bat` script that opens two separate windows (gateway + web Admin) so you can start everything with a single double‑click.
+This generates synthetic sensor data for testing dashboards and MQTT integration.
 
 ## 📡 Communication Protocol
 
@@ -232,35 +200,6 @@ Simplified view:
 ```text
 Sensor / Valve Nodes ⇄ Coordinator ⇄ UART ⇄ Gateway (WFMS) ⇄ MQTT ⇄ Dashboards / Clients
 ```
-## 🧪 Development & Testing
-
-### Gateway Testing
-
-```python
-from Dashboard_Coordinator.pc_gateway import ZigbeeGateway
-
-gateway = ZigbeeGateway()
-
-# Get recent telemetry
-rows = gateway.get_telemetry_last_n(100)
-print(f"Last 100 records: {len(rows)}")
-
-# Get hourly aggregates
-hourly = gateway.get_aggregated_data('hour', limit=24)
-print(f"Hourly data: {len(hourly)} hours")
-```
-
-## 🔗 Integration & Deployment
-
-### Firmware Integration Checklist
-
-- [ ] Implement protocol format correctly (see protocol documentation)
-- [ ] Test serial communication with terminal emulator
-- [ ] Verify periodic @DATA transmission
-- [ ] Validate JSON format: `"valve":"open"` or `"closed"` (lowercase)
-- [ ] Test threshold_set command with NVM persistence
-- [ ] Test valve_set command with acknowledgment
-- [ ] Verify automatic valve control logic
 
 ### Integration Testing Workflow
 

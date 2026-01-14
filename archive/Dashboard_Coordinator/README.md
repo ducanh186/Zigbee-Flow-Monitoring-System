@@ -36,7 +36,7 @@ streamlit run dashboard.py
 Dashboard_Coordinator/
 ├── dashboard.py          ← Main entry point (Streamlit UI)
 ├── pc_gateway.py         ← Optional standalone gateway CLI
-├── scan_COM13.py         ← Diagnostic tool (port/baudrate scanner)
+├── scan_COM11.py         ← Diagnostic tool (port/baudrate scanner)
 ├── requirements.txt      ← Python dependencies
 ├── DEMO_CHECKLIST.md     ← Complete demo workflow
 └── README.md             ← This file
@@ -76,11 +76,11 @@ streamlit run dashboard.py
 python pc_gateway.py
 
 # Connect to specific port
-python pc_gateway.py --port COM13 --baud 115200
+python pc_gateway.py --port COM11 --baud 115200
 
 # One-shot valve control
-python pc_gateway.py --port COM13 --send open
-python pc_gateway.py --port COM13 --send closed
+python pc_gateway.py --port COM11 --send open
+python pc_gateway.py --port COM11 --send closed
 
 # Test with fake device
 python fake_device.py --mode console | python pc_gateway.py --stdin
@@ -93,22 +93,22 @@ python fake_device.py --mode console | python pc_gateway.py --stdin
 
 ---
 
-### `scan_COM13.py` - Diagnostic Tool (7.9 KB)
-**Universal scanner** thay thế `test_serial.py` và `test_COM13_baudrates.py`.
+### `scan_COM11.py` - Diagnostic Tool (7.9 KB)
+**Universal scanner** thay thế `test_serial.py` và `test_COM11_baudrates.py`.
 
 **Usage:**
 ```bash
-# Scan default port (COM13) all baudrates
-python scan_COM13.py
+# Scan default port (COM11) all baudrates
+python scan_COM11.py
 
 # Scan specific port
-python scan_COM13.py COM13
+python scan_COM11.py COM11
 
 # Test single baudrate
-python scan_COM13.py COM13 115200
+python scan_COM11.py COM11 115200
 
 # Scan ALL available ports
-python scan_COM13.py --all
+python scan_COM11.py --all
 ```
 
 **Output:**
@@ -135,7 +135,7 @@ Xem chi tiết trong [DEMO_CHECKLIST.md](DEMO_CHECKLIST.md)
 **Quick version:**
 1. Plug Coordinator USB → PC
 2. Run `.\run_dashboard.bat`
-3. Click "CONNECT NOW" (auto-detected COM13 @ 115200)
+3. Click "CONNECT NOW" (auto-detected COM11 @ 115200)
 4. Demo:
    - Live telemetry chart
    - Open/Close valve
@@ -182,7 +182,7 @@ taskkill /F /IM streamlit.exe
 ### No Data Received
 ```bash
 # Verify baudrate với scan tool
-python scan_COM13.py COM13
+python scan_COM11.py COM11
 
 # Expected: 115200 baud, score > 0
 ```
@@ -219,22 +219,22 @@ streamlit --version  # Should be >= 1.29.0
 
 ## 🔄 Migration Notes (Cleanup)
 
-**Files REMOVED** (consolidated into `scan_COM13.py`):
+**Files REMOVED** (consolidated into `scan_COM11.py`):
 - ~~test_serial.py~~ - Basic baudrate test
-- ~~test_COM13_baudrates.py~~ - COM13-specific test
+- ~~test_COM11_baudrates.py~~ - COM11-specific test
 
 **Why consolidated?**
 - Giảm confusion (1 tool duy nhất)
-- `scan_COM13.py` hỗ trợ ANY port + ALL baudrates
+- `scan_COM11.py` hỗ trợ ANY port + ALL baudrates
 - Smarter detection logic (scoring system)
 
 **Backward compatible:**
 ```bash
 # Old way:
-python test_COM13_baudrates.py
+python test_COM11_baudrates.py
 
 # New way (same result):
-python scan_COM13.py COM13
+python scan_COM11.py COM11
 ```
 
 ---
@@ -266,7 +266,7 @@ python pc_gateway.py --stdin
 ### Integration Test
 ```bash
 # Real hardware test
-python scan_COM13.py          # Verify connection
+python scan_COM11.py          # Verify connection
 streamlit run dashboard.py    # Full UI test
 ```
 
@@ -282,6 +282,6 @@ streamlit run dashboard.py    # Full UI test
 
 **Recommended for DEMO:**
 1. Start here → [DEMO_CHECKLIST.md](DEMO_CHECKLIST.md)
-2. Run `scan_COM13.py` first (verify hardware)
+2. Run `scan_COM11.py` first (verify hardware)
 3. Use `run_dashboard.bat` (auto-cleanup COM ports)
 4. Keep `pc_gateway.py` for advanced CLI use

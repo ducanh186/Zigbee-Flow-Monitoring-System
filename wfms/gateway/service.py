@@ -814,7 +814,7 @@ Examples:
   python -m gateway.service                         # Real UART from .env
   python -m gateway.service --fake-uart            # Fake UART mode
   python -m gateway.service --fake-uart --drop-ack-prob 0.3  # With 30% ACK drop
-  python -m gateway.service --uart COM13 --baud 115200       # Override port/baud
+  python -m gateway.service --uart COM11 --baud 115200       # Override port/baud
         """
     )
     
@@ -834,7 +834,7 @@ Examples:
     parser.add_argument(
         "--uart",
         type=str,
-        help="Override UART port (e.g., COM13 or /dev/ttyUSB0)"
+        help="Override UART port (e.g., COM11 or /dev/ttyUSB0)"
     )
     
     parser.add_argument(
