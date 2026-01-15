@@ -188,8 +188,7 @@ mosquitto_sub -h localhost -t "wfms/lab1/#" -v
 
 ### Start MQTT Broker
 ```powershell
-cd ../tools/mqtt
-./start_broker.ps1
+ mosquitto -c mosquitto.conf -v
 ```
 
 ---
