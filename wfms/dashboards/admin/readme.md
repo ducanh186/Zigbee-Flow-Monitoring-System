@@ -11,7 +11,8 @@ You can start the dashboard using the provided PowerShell script or directly via
 .\run_admin.ps1
 
 # Option 2: Direct Streamlit command
-streamlit run dashboards/admin/admin_dashboard.py
+cd .\wfms   \dashboards\admin
+streamlit run .\admin_dashboard.py
 ```
 
 ---
